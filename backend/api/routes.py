@@ -83,6 +83,30 @@ async def get_portfolio(limit: int = 100):
     return history
 
 
+class RSIParams(BaseModel):
+    period: int = 14
+    oversold: int = 30
+    overbought: int = 70
+
+
+class MACDParams(BaseModel):
+    fast: int = 12
+    slow: int = 26
+    signal: int = 9
+
+
+class BollingerParams(BaseModel):
+    period: int = 20
+    std_dev: float = 2.0
+
+
+class RiskParams(BaseModel):
+    max_position_pct: float = 0.10
+    stop_loss_pct: float = 0.03
+    trailing_stop_pct: float = 0.02
+    max_single_order_usdt: float = 1000.0
+
+
 class BacktestRequest(BaseModel):
     symbol: str = "BTC/USDT"
     timeframe: str = "1h"
@@ -90,6 +114,10 @@ class BacktestRequest(BaseModel):
     end: str = "2025-12-31"
     balance: float = 10000.0
     strategies: list[str] = ["rsi", "macd", "bollinger"]
+    rsi: RSIParams = RSIParams()
+    macd: MACDParams = MACDParams()
+    bollinger: BollingerParams = BollingerParams()
+    risk: RiskParams = RiskParams()
 
 
 @router.post("/backtest")
@@ -98,9 +126,13 @@ async def run_backtest(req: BacktestRequest):
     from backend.backtest.engine import BacktestEngine
     from backend.backtest.exchange import BacktestExchange
     from backend.backtest.report import generate_report
+    from backend.config import (
+        BollingerConfig,
+        MACDConfig,
+        RiskConfig,
+        RSIConfig,
+    )
     from backend.strategies import STRATEGY_REGISTRY
-
-    settings = load_settings()
 
     start_dt = datetime.strptime(req.start, "%Y-%m-%d").replace(
         tzinfo=UTC,
@@ -121,10 +153,21 @@ async def run_backtest(req: BacktestRequest):
         symbol=req.symbol,
     )
 
-    config_map = {
-        "rsi": settings.strategies.rsi,
-        "macd": settings.strategies.macd,
-        "bollinger": settings.strategies.bollinger,
+    config_map: dict = {
+        "rsi": RSIConfig(
+            period=req.rsi.period,
+            oversold=req.rsi.oversold,
+            overbought=req.rsi.overbought,
+        ),
+        "macd": MACDConfig(
+            fast=req.macd.fast,
+            slow=req.macd.slow,
+            signal=req.macd.signal,
+        ),
+        "bollinger": BollingerConfig(
+            period=req.bollinger.period,
+            std_dev=req.bollinger.std_dev,
+        ),
     }
     strats = []
     for name in req.strategies:
@@ -136,11 +179,18 @@ async def run_backtest(req: BacktestRequest):
     if not strats:
         return {"error": "No valid strategies provided"}
 
+    risk_config = RiskConfig(
+        max_position_pct=req.risk.max_position_pct,
+        stop_loss_pct=req.risk.stop_loss_pct,
+        trailing_stop_pct=req.risk.trailing_stop_pct,
+        max_single_order_usdt=req.risk.max_single_order_usdt,
+    )
+
     engine = BacktestEngine(
         exchange=exchange,
         strategies=strats,
         symbol=req.symbol,
-        risk_config=settings.risk,
+        risk_config=risk_config,
     )
 
     result = await engine.run()

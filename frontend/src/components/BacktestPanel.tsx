@@ -51,6 +51,11 @@ const AVAILABLE_STRATEGIES = [
   { id: 'bollinger', label: 'Bollinger', description: 'Bollinger Bands' },
 ] as const;
 
+const POPULAR_SYMBOLS = [
+  'BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT',
+  'XRP/USDT', 'ADA/USDT', 'DOGE/USDT', 'AVAX/USDT',
+];
+
 export function BacktestPanel() {
   const [symbol, setSymbol] = useState('BTC/USDT');
   const [timeframe, setTimeframe] = useState('1h');
@@ -60,6 +65,24 @@ export function BacktestPanel() {
   const [enabledStrategies, setEnabledStrategies] = useState<Set<string>>(
     new Set(['rsi', 'macd', 'bollinger']),
   );
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  const [rsiPeriod, setRsiPeriod] = useState(14);
+  const [rsiOversold, setRsiOversold] = useState(30);
+  const [rsiOverbought, setRsiOverbought] = useState(70);
+
+  const [macdFast, setMacdFast] = useState(12);
+  const [macdSlow, setMacdSlow] = useState(26);
+  const [macdSignal, setMacdSignal] = useState(9);
+
+  const [bollPeriod, setBollPeriod] = useState(20);
+  const [bollStdDev, setBollStdDev] = useState(2.0);
+
+  const [riskMaxPos, setRiskMaxPos] = useState(10);
+  const [riskStopLoss, setRiskStopLoss] = useState(3);
+  const [riskTrailingStop, setRiskTrailingStop] = useState(2);
+  const [riskMaxOrder, setRiskMaxOrder] = useState(1000);
+
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -97,6 +120,15 @@ export function BacktestPanel() {
           end,
           balance: parseFloat(balance),
           strategies: Array.from(enabledStrategies),
+          rsi: { period: rsiPeriod, oversold: rsiOversold, overbought: rsiOverbought },
+          macd: { fast: macdFast, slow: macdSlow, signal: macdSignal },
+          bollinger: { period: bollPeriod, std_dev: bollStdDev },
+          risk: {
+            max_position_pct: riskMaxPos / 100,
+            stop_loss_pct: riskStopLoss / 100,
+            trailing_stop_pct: riskTrailingStop / 100,
+            max_single_order_usdt: riskMaxOrder,
+          },
         }),
       });
       const data = await res.json();
@@ -141,11 +173,15 @@ export function BacktestPanel() {
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
           <div>
             <label className="block text-xs text-[var(--text-secondary)] mb-1">Symbol</label>
-            <input
+            <select
               value={symbol}
               onChange={(e) => setSymbol(e.target.value)}
               className="w-full bg-[var(--bg-secondary)] border border-[var(--border)] rounded px-2 py-1.5 text-sm"
-            />
+            >
+              {POPULAR_SYMBOLS.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="block text-xs text-[var(--text-secondary)] mb-1">Timeframe</label>
@@ -210,6 +246,61 @@ export function BacktestPanel() {
             })}
           </div>
         </div>
+        <div className="mt-3">
+          <button
+            onClick={() => setShowAdvanced(!showAdvanced)}
+            className="text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
+          >
+            {showAdvanced ? '\u25BC' : '\u25B6'} Advanced Settings
+          </button>
+        </div>
+
+        {showAdvanced && (
+          <div className="mt-3 space-y-4 border-t border-[var(--border)] pt-4">
+            {enabledStrategies.has('rsi') && (
+              <div>
+                <h3 className="text-xs font-medium text-[var(--accent-blue)] mb-2">RSI Parameters</h3>
+                <div className="grid grid-cols-3 gap-3">
+                  <ParamInput label="Period" value={rsiPeriod} onChange={setRsiPeriod} min={2} max={50} />
+                  <ParamInput label="Oversold" value={rsiOversold} onChange={setRsiOversold} min={5} max={45} />
+                  <ParamInput label="Overbought" value={rsiOverbought} onChange={setRsiOverbought} min={55} max={95} />
+                </div>
+              </div>
+            )}
+
+            {enabledStrategies.has('macd') && (
+              <div>
+                <h3 className="text-xs font-medium text-[var(--accent-blue)] mb-2">MACD Parameters</h3>
+                <div className="grid grid-cols-3 gap-3">
+                  <ParamInput label="Fast" value={macdFast} onChange={setMacdFast} min={2} max={50} />
+                  <ParamInput label="Slow" value={macdSlow} onChange={setMacdSlow} min={10} max={100} />
+                  <ParamInput label="Signal" value={macdSignal} onChange={setMacdSignal} min={2} max={50} />
+                </div>
+              </div>
+            )}
+
+            {enabledStrategies.has('bollinger') && (
+              <div>
+                <h3 className="text-xs font-medium text-[var(--accent-blue)] mb-2">Bollinger Bands Parameters</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <ParamInput label="Period" value={bollPeriod} onChange={setBollPeriod} min={5} max={50} />
+                  <ParamInput label="Std Dev" value={bollStdDev} onChange={setBollStdDev} min={0.5} max={4} step={0.1} />
+                </div>
+              </div>
+            )}
+
+            <div>
+              <h3 className="text-xs font-medium text-[var(--accent-red)] mb-2">Risk Management</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <ParamInput label="Max Position %" value={riskMaxPos} onChange={setRiskMaxPos} min={1} max={100} />
+                <ParamInput label="Stop Loss %" value={riskStopLoss} onChange={setRiskStopLoss} min={0.5} max={20} step={0.5} />
+                <ParamInput label="Trailing Stop %" value={riskTrailingStop} onChange={setRiskTrailingStop} min={0.5} max={20} step={0.5} />
+                <ParamInput label="Max Order (USDT)" value={riskMaxOrder} onChange={setRiskMaxOrder} min={10} max={100000} step={10} />
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="flex items-center gap-3 mt-3">
           <button
             onClick={runBacktest}
@@ -445,6 +536,40 @@ function StatCard({ label, value, color }: { label: string; value: string; color
     <div className="bg-[var(--bg-card)] rounded-lg p-4 border border-[var(--border)]">
       <p className="text-xs font-medium text-[var(--text-secondary)] mb-1">{label}</p>
       <p className={`text-lg font-bold ${color ?? ''}`}>{value}</p>
+    </div>
+  );
+}
+
+function ParamInput({
+  label,
+  value,
+  onChange,
+  min,
+  max,
+  step = 1,
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+  min: number;
+  max: number;
+  step?: number;
+}) {
+  return (
+    <div>
+      <label className="flex items-center justify-between text-xs text-[var(--text-secondary)] mb-1">
+        <span>{label}</span>
+        <span className="font-mono">{value}</span>
+      </label>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full h-1.5 rounded-full appearance-none cursor-pointer accent-[var(--accent-blue)] bg-[var(--bg-secondary)]"
+      />
     </div>
   );
 }
