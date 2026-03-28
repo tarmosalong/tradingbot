@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 
+from backend.backtest.ai_filter import AIFilterConfig, AISimulationFilter
 from backend.backtest.exchange import BacktestExchange
 from backend.config import RiskConfig
 from backend.core.engine import TradingEngine
@@ -32,6 +33,7 @@ class BacktestResult:
     timestamps: list[str] = field(default_factory=list)
     trades: list[BacktestTrade] = field(default_factory=list)
     signals: list[Signal] = field(default_factory=list)
+    ai_filter_stats: dict[str, int] = field(default_factory=dict)
 
 
 class BacktestEngine:
@@ -43,11 +45,13 @@ class BacktestEngine:
         strategies: list[StrategyBase],
         symbol: str = "BTC/USDT",
         risk_config: RiskConfig | None = None,
+        ai_filter_config: AIFilterConfig | None = None,
     ) -> None:
         self._exchange = exchange
         self._strategies = strategies
         self._symbol = symbol
         self._risk = risk_config or RiskConfig()
+        self._ai_filter = AISimulationFilter(ai_filter_config)
 
     async def run(self) -> BacktestResult:
         """Run the backtest across all candles and return results."""
@@ -79,6 +83,7 @@ class BacktestEngine:
 
                 if signals:
                     combined = TradingEngine._aggregate_signals(signals)
+                    combined = self._ai_filter.evaluate(combined, ohlcv)
                     result.signals.append(combined)
 
                     if combined.direction != "HOLD":
@@ -102,6 +107,7 @@ class BacktestEngine:
         result.equity_curve.append(result.final_balance)
         final_row = self._exchange._current_row()
         result.timestamps.append(str(final_row["timestamp"]))
+        result.ai_filter_stats = self._ai_filter.stats.to_dict()
 
         logger.info(
             "Backtest completed",

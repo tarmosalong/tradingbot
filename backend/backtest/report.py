@@ -33,6 +33,7 @@ class BacktestReport:
     worst_trade_pnl: float = 0.0
     total_candles: int = 0
     strategy_stats: dict[str, dict[str, int]] = field(default_factory=dict)
+    ai_filter_stats: dict[str, int] = field(default_factory=dict)
 
     def print_report(self) -> None:
         lines = [
@@ -73,6 +74,19 @@ class BacktestReport:
                 )
             lines.append("")
 
+        if self.ai_filter_stats and self.ai_filter_stats.get("signals_reviewed", 0) > 0:
+            s = self.ai_filter_stats
+            lines.append("  --- AI Filter ---")
+            lines.append(f"  Signals reviewed:    {s.get('signals_reviewed', 0)}")
+            lines.append(f"  Blocked:             {s.get('signals_blocked', 0)}")
+            lines.append(f"  Reduced:             {s.get('signals_reduced', 0)}")
+            lines.append(f"  Boosted:             {s.get('signals_boosted', 0)}")
+            lines.append(f"  Crash detections:    {s.get('crash_detections', 0)}")
+            lines.append(f"  Volatility spikes:   {s.get('volatility_detections', 0)}")
+            lines.append(f"  Volume spikes:       {s.get('volume_spike_detections', 0)}")
+            lines.append(f"  Recovery detections: {s.get('recovery_detections', 0)}")
+            lines.append("")
+
         lines.append("=" * 60)
         print("\n".join(lines))
 
@@ -94,6 +108,7 @@ class BacktestReport:
             "worst_trade_pnl": self.worst_trade_pnl,
             "total_candles": self.total_candles,
             "strategy_stats": self.strategy_stats,
+            "ai_filter_stats": self.ai_filter_stats,
         }
 
 
@@ -134,6 +149,7 @@ def generate_report(result: BacktestResult) -> BacktestReport:
         report.worst_trade_pnl = min(trade_pnls)
 
     report.strategy_stats = _strategy_stats(result)
+    report.ai_filter_stats = result.ai_filter_stats
 
     return report
 

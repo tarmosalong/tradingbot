@@ -10,6 +10,17 @@ import {
 import { CandlestickChart } from './CandlestickChart';
 import type { OhlcvCandle, TradeMarker } from './CandlestickChart';
 
+interface AIFilterStats {
+  signals_reviewed: number;
+  signals_blocked: number;
+  signals_reduced: number;
+  signals_boosted: number;
+  crash_detections: number;
+  volatility_detections: number;
+  volume_spike_detections: number;
+  recovery_detections: number;
+}
+
 interface BacktestReport {
   initial_value: number;
   final_value: number;
@@ -26,6 +37,7 @@ interface BacktestReport {
   best_trade_pnl: number;
   worst_trade_pnl: number;
   strategy_stats?: Record<string, Record<string, number>>;
+  ai_filter_stats?: AIFilterStats;
 }
 
 interface BacktestTrade {
@@ -46,9 +58,21 @@ interface BacktestResult {
 }
 
 const AVAILABLE_STRATEGIES = [
-  { id: 'rsi', label: 'RSI', description: 'Relative Strength Index' },
-  { id: 'macd', label: 'MACD', description: 'Moving Average Convergence Divergence' },
-  { id: 'bollinger', label: 'Bollinger', description: 'Bollinger Bands' },
+  {
+    id: 'rsi',
+    label: 'RSI',
+    description: 'Relative Strength Index – Momentum oscillator (0–100) that identifies overbought/oversold conditions. Generates BUY when below oversold threshold, SELL when above overbought.',
+  },
+  {
+    id: 'macd',
+    label: 'MACD',
+    description: 'Moving Average Convergence Divergence – Trend-following indicator that tracks the relationship between two moving averages. Generates signals on histogram crossovers (bullish/bearish momentum shifts).',
+  },
+  {
+    id: 'bollinger',
+    label: 'Bollinger',
+    description: 'Bollinger Bands – Volatility-based bands around a moving average. Generates BUY when price drops below lower band (oversold), SELL when price rises above upper band (overbought).',
+  },
 ] as const;
 
 const POPULAR_SYMBOLS = [
@@ -82,6 +106,14 @@ export function BacktestPanel() {
   const [riskStopLoss, setRiskStopLoss] = useState(3);
   const [riskTrailingStop, setRiskTrailingStop] = useState(2);
   const [riskMaxOrder, setRiskMaxOrder] = useState(1000);
+
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const [aiStrength, setAiStrength] = useState(0.5);
+  const [aiCrashLookback, setAiCrashLookback] = useState(10);
+  const [aiCrashThreshold, setAiCrashThreshold] = useState(-5);
+  const [aiVolMultiplier, setAiVolMultiplier] = useState(2.0);
+  const [aiVolSpikeMultiplier, setAiVolSpikeMultiplier] = useState(2.5);
+  const [aiRecoveryBoost, setAiRecoveryBoost] = useState(1.3);
 
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<BacktestResult | null>(null);
@@ -138,6 +170,15 @@ export function BacktestPanel() {
             trailing_stop_pct: riskTrailingStop / 100,
             max_single_order_usdt: riskMaxOrder,
           },
+          ai_filter: {
+            enabled: aiEnabled,
+            strength: aiStrength,
+            crash_lookback: aiCrashLookback,
+            crash_threshold_pct: aiCrashThreshold,
+            volatility_multiplier: aiVolMultiplier,
+            volume_spike_multiplier: aiVolSpikeMultiplier,
+            recovery_boost: aiRecoveryBoost,
+          },
         }),
       });
       if (!res.ok) {
@@ -185,8 +226,8 @@ export function BacktestPanel() {
           Run Backtest
         </h2>
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-          <div>
-            <label className="block text-xs text-[var(--text-secondary)] mb-1">Symbol</label>
+          <div title="Crypto trading pair to backtest. The base currency is traded against USDT stablecoin.">
+            <label className="block text-xs text-[var(--text-secondary)] mb-1 border-b border-dotted border-[var(--text-secondary)]/40 w-fit cursor-help">Symbol</label>
             <select
               value={symbol}
               onChange={(e) => setSymbol(e.target.value)}
@@ -197,8 +238,8 @@ export function BacktestPanel() {
               ))}
             </select>
           </div>
-          <div>
-            <label className="block text-xs text-[var(--text-secondary)] mb-1">Timeframe</label>
+          <div title="Candle interval for the price data. Smaller = more data points and more signals. 1h is a good starting point.">
+            <label className="block text-xs text-[var(--text-secondary)] mb-1 border-b border-dotted border-[var(--text-secondary)]/40 w-fit cursor-help">Timeframe</label>
             <select
               value={timeframe}
               onChange={(e) => setTimeframe(e.target.value)}
@@ -210,8 +251,8 @@ export function BacktestPanel() {
               <option value="1d">1d</option>
             </select>
           </div>
-          <div>
-            <label className="block text-xs text-[var(--text-secondary)] mb-1">Start</label>
+          <div title="Start date for historical data. Data is downloaded from Binance. Longer periods = more accurate results but slower.">
+            <label className="block text-xs text-[var(--text-secondary)] mb-1 border-b border-dotted border-[var(--text-secondary)]/40 w-fit cursor-help">Start</label>
             <input
               type="date"
               value={start}
@@ -219,8 +260,8 @@ export function BacktestPanel() {
               className="w-full bg-[var(--bg-secondary)] border border-[var(--border)] rounded px-2 py-1.5 text-sm"
             />
           </div>
-          <div>
-            <label className="block text-xs text-[var(--text-secondary)] mb-1">End</label>
+          <div title="End date for historical data. Use a past date — backtest simulates trading over this historical period.">
+            <label className="block text-xs text-[var(--text-secondary)] mb-1 border-b border-dotted border-[var(--text-secondary)]/40 w-fit cursor-help">End</label>
             <input
               type="date"
               value={end}
@@ -228,8 +269,8 @@ export function BacktestPanel() {
               className="w-full bg-[var(--bg-secondary)] border border-[var(--border)] rounded px-2 py-1.5 text-sm"
             />
           </div>
-          <div>
-            <label className="block text-xs text-[var(--text-secondary)] mb-1">Balance (USDT)</label>
+          <div title="Starting portfolio balance in USDT. This is the simulated money you begin trading with.">
+            <label className="block text-xs text-[var(--text-secondary)] mb-1 border-b border-dotted border-[var(--text-secondary)]/40 w-fit cursor-help">Balance (USDT)</label>
             <input
               value={balance}
               onChange={(e) => setBalance(e.target.value)}
@@ -239,7 +280,9 @@ export function BacktestPanel() {
         </div>
 
         <div className="mt-3">
-          <label className="block text-xs text-[var(--text-secondary)] mb-2">Strategies</label>
+          <label className="block text-xs text-[var(--text-secondary)] mb-2 border-b border-dotted border-[var(--text-secondary)]/40 w-fit cursor-help" title="Technical analysis strategies used to generate BUY/SELL/HOLD signals. Multiple strategies are combined — a trade is executed when they agree.">
+            Strategies
+          </label>
           <div className="flex flex-wrap gap-2">
             {AVAILABLE_STRATEGIES.map((s) => {
               const active = enabledStrategies.has(s.id);
@@ -261,6 +304,40 @@ export function BacktestPanel() {
           </div>
         </div>
         <div className="mt-3">
+          <div className="flex items-center gap-3">
+            <label
+              className="flex items-center gap-2 cursor-pointer select-none"
+              title="Simulated AI filter that detects crash conditions (rapid price drops, high volatility, volume spikes) and adjusts signal confidence. Blocks risky BUY signals during market crashes and boosts SELL signals. Does not call any API — uses mathematical heuristics to approximate what an AI model would decide."
+            >
+              <input
+                type="checkbox"
+                checked={aiEnabled}
+                onChange={(e) => setAiEnabled(e.target.checked)}
+                className="w-4 h-4 rounded accent-[var(--accent-purple,#a855f7)] cursor-pointer"
+              />
+              <span className="text-sm font-medium text-[var(--accent-purple,#a855f7)] border-b border-dotted border-[var(--accent-purple,#a855f7)]/40 cursor-help">
+                AI Crash Filter
+              </span>
+            </label>
+            {aiEnabled && (
+              <div className="flex items-center gap-2" title="How aggressively the AI filter modifies signals. 0 = no effect, 1 = maximum filtering. At 0.5 a detected crash reduces BUY confidence by ~50%.">
+                <span className="text-xs text-[var(--text-secondary)]">Strength:</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={aiStrength}
+                  onChange={(e) => setAiStrength(Number(e.target.value))}
+                  className="w-24 h-1.5 rounded-full appearance-none cursor-pointer accent-[var(--accent-purple,#a855f7)] bg-[var(--bg-secondary)]"
+                />
+                <span className="text-xs font-mono text-[var(--accent-purple,#a855f7)]">{aiStrength.toFixed(2)}</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-3">
           <button
             onClick={() => setShowAdvanced(!showAdvanced)}
             className="text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
@@ -275,9 +352,9 @@ export function BacktestPanel() {
               <div>
                 <h3 className="text-xs font-medium text-[var(--accent-blue)] mb-2">RSI Parameters</h3>
                 <div className="grid grid-cols-3 gap-3">
-                  <ParamInput label="Period" value={rsiPeriod} onChange={setRsiPeriod} min={2} max={50} />
-                  <ParamInput label="Oversold" value={rsiOversold} onChange={setRsiOversold} min={5} max={45} />
-                  <ParamInput label="Overbought" value={rsiOverbought} onChange={setRsiOverbought} min={55} max={95} />
+                  <ParamInput label="Period" value={rsiPeriod} onChange={setRsiPeriod} min={2} max={50} tooltip="Number of candles used to calculate RSI. Lower = more sensitive, higher = smoother. Default: 14" />
+                  <ParamInput label="Oversold" value={rsiOversold} onChange={setRsiOversold} min={5} max={45} tooltip="RSI level below which the asset is considered oversold (BUY signal). Typical range: 20–35. Default: 30" />
+                  <ParamInput label="Overbought" value={rsiOverbought} onChange={setRsiOverbought} min={55} max={95} tooltip="RSI level above which the asset is considered overbought (SELL signal). Typical range: 65–80. Default: 70" />
                 </div>
               </div>
             )}
@@ -286,9 +363,9 @@ export function BacktestPanel() {
               <div>
                 <h3 className="text-xs font-medium text-[var(--accent-blue)] mb-2">MACD Parameters</h3>
                 <div className="grid grid-cols-3 gap-3">
-                  <ParamInput label="Fast" value={macdFast} onChange={setMacdFast} min={2} max={50} />
-                  <ParamInput label="Slow" value={macdSlow} onChange={setMacdSlow} min={10} max={100} />
-                  <ParamInput label="Signal" value={macdSignal} onChange={setMacdSignal} min={2} max={50} />
+                  <ParamInput label="Fast EMA" value={macdFast} onChange={setMacdFast} min={2} max={50} tooltip="Period for the fast Exponential Moving Average. Shorter period reacts faster to price changes. Default: 12" />
+                  <ParamInput label="Slow EMA" value={macdSlow} onChange={setMacdSlow} min={10} max={100} tooltip="Period for the slow Exponential Moving Average. Longer period smooths out noise. Must be larger than fast EMA. Default: 26" />
+                  <ParamInput label="Signal" value={macdSignal} onChange={setMacdSignal} min={2} max={50} tooltip="Period for the signal line (EMA of MACD line). Used to detect crossovers. Lower = more signals. Default: 9" />
                 </div>
               </div>
             )}
@@ -297,8 +374,21 @@ export function BacktestPanel() {
               <div>
                 <h3 className="text-xs font-medium text-[var(--accent-blue)] mb-2">Bollinger Bands Parameters</h3>
                 <div className="grid grid-cols-2 gap-3">
-                  <ParamInput label="Period" value={bollPeriod} onChange={setBollPeriod} min={5} max={50} />
-                  <ParamInput label="Std Dev" value={bollStdDev} onChange={setBollStdDev} min={0.5} max={4} step={0.1} />
+                  <ParamInput label="Period" value={bollPeriod} onChange={setBollPeriod} min={5} max={50} tooltip="Number of candles for the moving average that forms the middle band. Lower = tighter bands, higher = smoother. Default: 20" />
+                  <ParamInput label="Std Dev" value={bollStdDev} onChange={setBollStdDev} min={0.5} max={4} step={0.1} tooltip="Number of standard deviations for the upper/lower bands. Higher = wider bands = fewer signals. Typical range: 1.5–2.5. Default: 2.0" />
+                </div>
+              </div>
+            )}
+
+            {aiEnabled && (
+              <div>
+                <h3 className="text-xs font-medium text-[var(--accent-purple,#a855f7)] mb-2">AI Crash Filter Parameters</h3>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  <ParamInput label="Crash Lookback" value={aiCrashLookback} onChange={setAiCrashLookback} min={3} max={30} tooltip="Number of candles to look back when detecting a price crash. Lower = more sensitive to short-term drops. Default: 10" />
+                  <ParamInput label="Crash Threshold %" value={aiCrashThreshold} onChange={setAiCrashThreshold} min={-20} max={-1} tooltip="Price drop percentage that triggers crash detection. E.g. -5 means a 5% drop over the lookback period is flagged as a crash. Default: -5%" />
+                  <ParamInput label="Volatility Mult." value={aiVolMultiplier} onChange={setAiVolMultiplier} min={1} max={5} step={0.1} tooltip="How much higher recent volatility must be compared to the long-term average to trigger a warning. 2.0 = recent volatility must be 2x normal. Default: 2.0" />
+                  <ParamInput label="Volume Spike Mult." value={aiVolSpikeMultiplier} onChange={setAiVolSpikeMultiplier} min={1} max={5} step={0.1} tooltip="How much higher the current volume must be vs 20-candle average to flag a panic sell. Only triggers when price is also falling. Default: 2.5" />
+                  <ParamInput label="Recovery Boost" value={aiRecoveryBoost} onChange={setAiRecoveryBoost} min={1} max={2} step={0.05} tooltip="Confidence multiplier applied to BUY signals during recovery (price bouncing back after a crash). 1.3 = 30% confidence boost. Default: 1.3" />
                 </div>
               </div>
             )}
@@ -306,10 +396,10 @@ export function BacktestPanel() {
             <div>
               <h3 className="text-xs font-medium text-[var(--accent-red)] mb-2">Risk Management</h3>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <ParamInput label="Max Position %" value={riskMaxPos} onChange={setRiskMaxPos} min={1} max={100} />
-                <ParamInput label="Stop Loss %" value={riskStopLoss} onChange={setRiskStopLoss} min={0.5} max={20} step={0.5} />
-                <ParamInput label="Trailing Stop %" value={riskTrailingStop} onChange={setRiskTrailingStop} min={0.5} max={20} step={0.5} />
-                <ParamInput label="Max Order (USDT)" value={riskMaxOrder} onChange={setRiskMaxOrder} min={10} max={100000} step={10} />
+                <ParamInput label="Max Position %" value={riskMaxPos} onChange={setRiskMaxPos} min={1} max={100} tooltip="Maximum percentage of available balance that can be used for a single position. Lower = more conservative. Default: 10%" />
+                <ParamInput label="Stop Loss %" value={riskStopLoss} onChange={setRiskStopLoss} min={0.5} max={20} step={0.5} tooltip="Fixed stop-loss percentage below purchase price. Position is closed if price drops this much. Default: 3%" />
+                <ParamInput label="Trailing Stop %" value={riskTrailingStop} onChange={setRiskTrailingStop} min={0.5} max={20} step={0.5} tooltip="Dynamic stop that follows price upward. Locks in profits while allowing upside. Triggers if price drops this % from its peak. Default: 2%" />
+                <ParamInput label="Max Order (USDT)" value={riskMaxOrder} onChange={setRiskMaxOrder} min={10} max={100000} step={10} tooltip="Maximum value (in USDT) for a single order. Prevents any one trade from being too large. Default: $1,000" />
               </div>
             </div>
           </div>
@@ -346,29 +436,46 @@ export function BacktestPanel() {
               label="Total Return"
               value={`${result.report.total_return_pct >= 0 ? '+' : ''}${result.report.total_return_pct.toFixed(2)}%`}
               color={isUp ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'}
+              tooltip="Overall profit or loss percentage over the entire backtest period relative to the starting balance."
             />
             <StatCard
               label="Max Drawdown"
               value={`${result.report.max_drawdown_pct.toFixed(2)}%`}
               color="text-[var(--accent-red)]"
+              tooltip="Largest peak-to-trough decline in portfolio value. Measures the worst-case scenario during the period. Lower is better."
             />
-            <StatCard label="Sharpe Ratio" value={result.report.sharpe_ratio.toFixed(3)} />
-            <StatCard label="Win Rate" value={`${result.report.win_rate.toFixed(1)}%`} />
-            <StatCard label="Total Trades" value={String(result.report.total_trades)} />
+            <StatCard
+              label="Sharpe Ratio"
+              value={result.report.sharpe_ratio.toFixed(3)}
+              tooltip="Risk-adjusted return metric. Measures excess return per unit of volatility. > 1.0 is good, > 2.0 is very good, > 3.0 is excellent."
+            />
+            <StatCard
+              label="Win Rate"
+              value={`${result.report.win_rate.toFixed(1)}%`}
+              tooltip="Percentage of trades that were profitable. Note: a high win rate with small wins and large losses can still lose money."
+            />
+            <StatCard
+              label="Total Trades"
+              value={String(result.report.total_trades)}
+              tooltip="Total number of executed trades (buys and sells). More trades = higher fees but potentially more opportunities captured."
+            />
             <StatCard
               label="Avg Trade P&L"
               value={`$${result.report.avg_trade_pnl.toFixed(2)}`}
               color={result.report.avg_trade_pnl >= 0 ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'}
+              tooltip="Average profit or loss per trade in USD. Shows the expected value of each trade."
             />
             <StatCard
               label="Best Trade"
               value={`$${result.report.best_trade_pnl.toFixed(2)}`}
               color="text-[var(--accent-green)]"
+              tooltip="Most profitable single trade during the backtest period."
             />
             <StatCard
               label="Worst Trade"
               value={`$${result.report.worst_trade_pnl.toFixed(2)}`}
               color="text-[var(--accent-red)]"
+              tooltip="Biggest loss from a single trade during the backtest period."
             />
           </div>
 
@@ -480,6 +587,62 @@ export function BacktestPanel() {
             </div>
           )}
 
+          {/* AI Filter stats */}
+          {result.report.ai_filter_stats && result.report.ai_filter_stats.signals_reviewed > 0 && (
+            <div className="bg-[var(--bg-card)] rounded-lg p-4 border border-[var(--accent-purple,#a855f7)]/30">
+              <h2 className="text-sm font-medium text-[var(--accent-purple,#a855f7)] mb-3">
+                AI Crash Filter Results
+              </h2>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <AIStatItem
+                  label="Signals Reviewed"
+                  value={result.report.ai_filter_stats.signals_reviewed}
+                  tooltip="Total BUY/SELL signals that the AI filter evaluated."
+                />
+                <AIStatItem
+                  label="Blocked"
+                  value={result.report.ai_filter_stats.signals_blocked}
+                  color="text-[var(--accent-red)]"
+                  tooltip="BUY signals converted to HOLD because confidence dropped below threshold during risky conditions."
+                />
+                <AIStatItem
+                  label="Reduced"
+                  value={result.report.ai_filter_stats.signals_reduced}
+                  color="text-[var(--accent-yellow,#eab308)]"
+                  tooltip="Signals that still executed but with lowered confidence (smaller position size)."
+                />
+                <AIStatItem
+                  label="Boosted"
+                  value={result.report.ai_filter_stats.signals_boosted}
+                  color="text-[var(--accent-green)]"
+                  tooltip="Signals with increased confidence — either recovery BUY opportunities or SELL signals during crashes."
+                />
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-2">
+                <AIStatItem
+                  label="Crash Events"
+                  value={result.report.ai_filter_stats.crash_detections}
+                  tooltip="Times a rapid price drop was detected in the lookback window."
+                />
+                <AIStatItem
+                  label="Volatility Spikes"
+                  value={result.report.ai_filter_stats.volatility_detections}
+                  tooltip="Times recent volatility exceeded the long-term average by the configured multiplier."
+                />
+                <AIStatItem
+                  label="Volume Spikes"
+                  value={result.report.ai_filter_stats.volume_spike_detections}
+                  tooltip="Times volume surged above average while price dropped (panic selling)."
+                />
+                <AIStatItem
+                  label="Recoveries"
+                  value={result.report.ai_filter_stats.recovery_detections}
+                  tooltip="Times a price bounce-back was detected after a recent crash (potential buy opportunity)."
+                />
+              </div>
+            </div>
+          )}
+
           {/* Trades table */}
           {result.trades.length > 0 && (
             <div className="bg-[var(--bg-card)] rounded-lg border border-[var(--border)] overflow-hidden">
@@ -545,10 +708,12 @@ export function BacktestPanel() {
   );
 }
 
-function StatCard({ label, value, color }: { label: string; value: string; color?: string }) {
+function StatCard({ label, value, color, tooltip }: { label: string; value: string; color?: string; tooltip?: string }) {
   return (
-    <div className="bg-[var(--bg-card)] rounded-lg p-4 border border-[var(--border)]">
-      <p className="text-xs font-medium text-[var(--text-secondary)] mb-1">{label}</p>
+    <div className="bg-[var(--bg-card)] rounded-lg p-4 border border-[var(--border)]" title={tooltip}>
+      <p className={`text-xs font-medium text-[var(--text-secondary)] mb-1 ${tooltip ? 'border-b border-dotted border-[var(--text-secondary)]/40 w-fit cursor-help' : ''}`}>
+        {label}
+      </p>
       <p className={`text-lg font-bold ${color ?? ''}`}>{value}</p>
     </div>
   );
@@ -561,6 +726,7 @@ function ParamInput({
   min,
   max,
   step = 1,
+  tooltip,
 }: {
   label: string;
   value: number;
@@ -568,11 +734,14 @@ function ParamInput({
   min: number;
   max: number;
   step?: number;
+  tooltip?: string;
 }) {
   return (
-    <div>
+    <div title={tooltip}>
       <label className="flex items-center justify-between text-xs text-[var(--text-secondary)] mb-1">
-        <span>{label}</span>
+        <span className={tooltip ? 'border-b border-dotted border-[var(--text-secondary)]/40 cursor-help' : ''}>
+          {label}
+        </span>
         <span className="font-mono">{value}</span>
       </label>
       <input
@@ -584,6 +753,17 @@ function ParamInput({
         onChange={(e) => onChange(Number(e.target.value))}
         className="w-full h-1.5 rounded-full appearance-none cursor-pointer accent-[var(--accent-blue)] bg-[var(--bg-secondary)]"
       />
+    </div>
+  );
+}
+
+function AIStatItem({ label, value, color, tooltip }: { label: string; value: number; color?: string; tooltip?: string }) {
+  return (
+    <div className="flex items-center justify-between py-1" title={tooltip}>
+      <span className={`text-xs ${tooltip ? 'border-b border-dotted border-[var(--text-secondary)]/40 cursor-help' : ''} text-[var(--text-secondary)]`}>
+        {label}
+      </span>
+      <span className={`text-sm font-mono font-bold ${color ?? ''}`}>{value}</span>
     </div>
   );
 }

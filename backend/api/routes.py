@@ -107,6 +107,16 @@ class RiskParams(BaseModel):
     max_single_order_usdt: float = 1000.0
 
 
+class AIFilterParams(BaseModel):
+    enabled: bool = False
+    strength: float = 0.5
+    crash_lookback: int = 10
+    crash_threshold_pct: float = -5.0
+    volatility_multiplier: float = 2.0
+    volume_spike_multiplier: float = 2.5
+    recovery_boost: float = 1.3
+
+
 class BacktestRequest(BaseModel):
     symbol: str = "BTC/USDT"
     timeframe: str = "1h"
@@ -118,6 +128,7 @@ class BacktestRequest(BaseModel):
     macd: MACDParams = MACDParams()
     bollinger: BollingerParams = BollingerParams()
     risk: RiskParams = RiskParams()
+    ai_filter: AIFilterParams = AIFilterParams()
 
 
 @router.post("/backtest")
@@ -192,11 +203,24 @@ async def run_backtest(req: BacktestRequest):
         max_single_order_usdt=req.risk.max_single_order_usdt,
     )
 
+    from backend.backtest.ai_filter import AIFilterConfig
+
+    ai_config = AIFilterConfig(
+        enabled=req.ai_filter.enabled,
+        strength=req.ai_filter.strength,
+        crash_lookback=req.ai_filter.crash_lookback,
+        crash_threshold_pct=req.ai_filter.crash_threshold_pct,
+        volatility_multiplier=req.ai_filter.volatility_multiplier,
+        volume_spike_multiplier=req.ai_filter.volume_spike_multiplier,
+        recovery_boost=req.ai_filter.recovery_boost,
+    )
+
     engine = BacktestEngine(
         exchange=exchange,
         strategies=strats,
         symbol=req.symbol,
         risk_config=risk_config,
+        ai_filter_config=ai_config,
     )
 
     result = await engine.run()
