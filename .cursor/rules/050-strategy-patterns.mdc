@@ -1,0 +1,44 @@
+---
+description: Strategy base class contract, Signal dataclass, strategy registration
+globs: backend/strategies/**/*.py
+alwaysApply: false
+---
+
+# Strategy Patterns
+
+## Signal Dataclass
+
+All strategies return a `Signal`:
+
+```python
+@dataclass
+class Signal:
+    symbol: str
+    direction: Literal["BUY", "SELL", "HOLD"]
+    confidence: float          # 0.0 to 1.0
+    strategy_name: str
+    reason: str
+    indicators: dict[str, float]  # supporting data
+    timestamp: datetime
+```
+
+## Base Class
+
+```python
+class StrategyBase(ABC):
+    name: str
+
+    @abstractmethod
+    async def analyze(self, symbol: str, ohlcv: pd.DataFrame) -> Signal:
+        """Analyze market data and return a trading signal."""
+        ...
+```
+
+## Rules
+
+- One strategy per file in `backend/strategies/`
+- Strategies must be stateless — all state lives in the engine or database
+- Never call exchange methods directly from a strategy — only receive OHLCV data
+- Combine signals from multiple strategies in the engine, not inside individual strategies
+- Log every signal with its confidence and reason
+- New strategies: create the class, add to `STRATEGY_REGISTRY` dict in `strategies/__init__.py`

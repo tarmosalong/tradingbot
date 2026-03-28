@@ -1,0 +1,44 @@
+---
+description: Exchange abstraction contract - ABC interface that paper and live must both implement
+globs: backend/exchange/**/*.py
+alwaysApply: false
+---
+
+# Exchange Patterns
+
+## Abstract Base Class
+
+All exchange clients MUST inherit from `ExchangeBase` in `backend/exchange/base.py` and implement every abstract method. This ensures paper and live trading are fully interchangeable.
+
+## Required Interface
+
+```python
+class ExchangeBase(ABC):
+    @abstractmethod
+    async def get_balance(self) -> dict[str, float]: ...
+
+    @abstractmethod
+    async def get_ticker(self, symbol: str) -> Ticker: ...
+
+    @abstractmethod
+    async def get_ohlcv(self, symbol: str, timeframe: str, limit: int) -> pd.DataFrame: ...
+
+    @abstractmethod
+    async def create_order(self, symbol: str, side: str, order_type: str, amount: float, price: float | None = None) -> Order: ...
+
+    @abstractmethod
+    async def cancel_order(self, order_id: str, symbol: str) -> None: ...
+
+    @abstractmethod
+    async def get_open_orders(self, symbol: str | None = None) -> list[Order]: ...
+
+    @abstractmethod
+    async def close(self) -> None: ...
+```
+
+## Rules
+
+- `PaperExchange` must simulate fills using real market prices (from Binance WebSocket data)
+- `BinanceClient` wraps CCXT async — handle rate limits with exponential backoff
+- Never expose raw CCXT objects outside the exchange module — always return project-defined dataclasses (Ticker, Order, etc.)
+- Factory function `create_exchange(config)` returns the correct client based on `config.mode`

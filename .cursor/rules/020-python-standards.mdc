@@ -1,0 +1,56 @@
+---
+description: Python coding standards - type hints, naming, error handling, logging
+globs: backend/**/*.py
+alwaysApply: false
+---
+
+# Python Standards
+
+## Type Hints
+
+Add type annotations to all function signatures and class attributes. Use `from __future__ import annotations` at the top of every module.
+
+```python
+async def fetch_price(symbol: str, timeframe: str = "1h") -> float:
+    ...
+```
+
+## Naming
+
+- snake_case for functions, variables, modules
+- PascalCase for classes
+- UPPER_SNAKE_CASE for constants
+- Prefix private methods/attributes with underscore
+
+## Error Handling
+
+- Never use bare `except:` — always catch specific exceptions
+- Use custom exception classes in `backend/core/exceptions.py`
+- Log the error before re-raising or wrapping
+
+```python
+# Bad
+try:
+    await exchange.create_order(...)
+except:
+    pass
+
+# Good
+try:
+    await exchange.create_order(...)
+except ccxt.InsufficientFunds as e:
+    logger.error("Insufficient funds for %s: %s", symbol, e)
+    raise OrderError(f"Not enough balance for {symbol}") from e
+```
+
+## Logging
+
+- Use `structlog` for structured JSON logging
+- Never use `print()` — always `logger.info/warning/error/debug`
+- Include context: symbol, strategy name, signal direction
+
+## Imports
+
+- Group: stdlib → third-party → local, separated by blank lines
+- Absolute imports only (`from backend.exchange.base import ...`)
+- No inline imports inside functions

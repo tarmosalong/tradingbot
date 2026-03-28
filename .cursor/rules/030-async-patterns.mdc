@@ -1,0 +1,50 @@
+---
+description: Async/await patterns - no blocking calls, proper cancellation, resource cleanup
+globs: backend/**/*.py
+alwaysApply: false
+---
+
+# Async Patterns
+
+## Core Rules
+
+- All I/O (exchange API, database, HTTP, file) MUST use async/await
+- Never call blocking functions (`time.sleep`, `requests.get`, synchronous file I/O) in async code
+- Use `asyncio.sleep()` instead of `time.sleep()`
+- Use `aiohttp` instead of `requests`
+- Use `aiosqlite` instead of `sqlite3`
+
+## Resource Cleanup
+
+Always use async context managers for connections:
+
+```python
+async with aiohttp.ClientSession() as session:
+    async with session.get(url) as response:
+        data = await response.json()
+```
+
+## Cancellation
+
+- Respect `asyncio.CancelledError` — let it propagate after cleanup
+- Use `try/finally` for resource cleanup, not `try/except CancelledError`
+
+## Concurrency
+
+- Use `asyncio.gather()` for parallel independent tasks
+- Use `asyncio.Queue` for producer-consumer patterns (WebSocket → strategy)
+- Limit concurrent exchange API calls with `asyncio.Semaphore` to respect rate limits
+
+## WebSocket Pattern
+
+```python
+async def _listen_ws(self) -> None:
+    while self._running:
+        try:
+            msg = await ws.recv()
+            await self._process_message(msg)
+        except websockets.ConnectionClosed:
+            logger.warning("WebSocket disconnected, reconnecting...")
+            await asyncio.sleep(1)
+            await self._connect()
+```

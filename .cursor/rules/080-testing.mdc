@@ -1,0 +1,54 @@
+---
+description: Pytest conventions - test structure, AAA pattern, fixtures, mocking
+globs: "**/test_*.py"
+alwaysApply: false
+---
+
+# Testing Conventions
+
+## Structure
+
+- Tests live in `tests/` mirroring `backend/` layout:
+  - `tests/exchange/test_binance_client.py`
+  - `tests/strategies/test_technical.py`
+  - `tests/ai/test_claude_client.py`
+- File naming: `test_<module>.py`
+- Function naming: `test_<what>_<condition>_<expected>`
+
+## AAA Pattern
+
+Every test follows Arrange-Act-Assert:
+
+```python
+async def test_rsi_strategy_oversold_returns_buy():
+    # Arrange
+    ohlcv = create_mock_ohlcv(rsi_value=25)
+
+    # Act
+    signal = await rsi_strategy.analyze("BTC/USDT", ohlcv)
+
+    # Assert
+    assert signal.direction == "BUY"
+    assert signal.confidence > 0.5
+```
+
+## Fixtures
+
+- `conftest.py` at `tests/` root with shared fixtures
+- `mock_exchange` — returns `AsyncMock` implementing `ExchangeBase`
+- `mock_claude` — returns canned AI responses, never calls real API
+- `sample_ohlcv` — realistic OHLCV DataFrame for strategy tests
+- Use `pytest-asyncio` for async test functions
+
+## Mocking
+
+- Mock exchange API calls with `unittest.mock.AsyncMock`
+- Mock Claude responses — never call the real API in tests
+- Use `freezegun` or `time_machine` for time-dependent tests
+- Mock WebSocket streams with async generators
+
+## Coverage Target
+
+- Minimum 80% line coverage
+- 100% coverage on risk manager and order executor (critical paths)
+- Run: `pytest --cov=backend --cov-report=term-missing`

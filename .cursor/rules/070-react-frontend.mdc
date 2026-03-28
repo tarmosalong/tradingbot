@@ -1,0 +1,42 @@
+---
+description: React frontend patterns - functional components, hooks, Tailwind, WebSocket
+globs: frontend/src/**/*.tsx
+alwaysApply: false
+---
+
+# React Frontend Patterns
+
+## Component Structure
+
+- Functional components only — no class components
+- One component per file, filename matches component name (PascalCase)
+- Props defined with TypeScript interfaces, not inline types
+- Extract reusable logic into custom hooks in `hooks/`
+
+## Styling
+
+- TailwindCSS for all styling — no CSS modules or styled-components
+- Use semantic color variables via Tailwind config (e.g., `text-profit`, `text-loss`)
+- Responsive: mobile-first with `sm:`, `md:`, `lg:` breakpoints
+
+## State Management
+
+- Local state with `useState` / `useReducer`
+- Server state via React Query (`@tanstack/react-query`) for REST API data
+- WebSocket data through custom `useWebSocket` hook — not stored in global state
+
+## WebSocket Pattern
+
+```tsx
+const { data, status } = useWebSocket<TickerUpdate>("ws://localhost:8000/ws/ticker");
+```
+
+- Reconnect automatically on disconnect
+- Parse incoming JSON, validate shape before updating state
+- Show connection status indicator in the UI
+
+## Charts
+
+- Use TradingView Lightweight Charts for price/candlestick charts
+- Use Recharts for PnL, portfolio allocation, and other dashboard charts
+- Charts must handle empty/loading states gracefully

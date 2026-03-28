@@ -1,0 +1,39 @@
+---
+description: Security rules - API key handling, secrets management, exchange permissions
+alwaysApply: true
+---
+
+# Security Rules
+
+## Secrets Management
+
+- API keys, secrets, and tokens go ONLY in `.env` — never in code, config.yaml, or comments
+- `.env` is in `.gitignore` — never committed
+- Use `.env.example` with placeholder values as a template
+- Load secrets via `python-dotenv` or Pydantic Settings
+
+## Binance API Key Permissions
+
+- Enable ONLY: "Read Info" + "Spot Trading"
+- NEVER enable "Enable Withdrawals"
+- Set IP whitelist to the server/machine running the bot
+- Enable 2FA on the Binance account
+
+## Anthropic API Key
+
+- Separate from exchange keys — different rotation schedule
+- Track usage/costs via logging (token counts per call)
+
+## Code Rules
+
+- Never log API keys, even partially
+- Never include secrets in error messages or exception strings
+- Validate that required env vars exist at startup — fail fast with clear message
+- Paper trading mode must work without any exchange API key (uses public endpoints only)
+
+## Live Trading Safeguards
+
+- Two-stage verification before executing live trades: strategy signal + risk manager approval
+- Log every live order with full context before execution
+- Maximum single order size limit as hard cap in config
+- Kill switch: ability to halt all trading immediately via API endpoint

@@ -1,0 +1,54 @@
+trading:
+  mode: paper                    # paper | live
+  pairs:
+    - BTC/USDT
+    - ETH/USDT
+  timeframe: 1h                  # OHLCV candle timeframe
+  poll_interval_seconds: 60      # how often to run strategy loop
+
+paper_trading:
+  initial_balance_usdt: 10000.0
+
+exchange:
+  name: binance
+  sandbox: false                 # use Binance testnet (for live testing)
+  rate_limit_ms: 100             # min ms between API calls
+
+strategies:
+  enabled:
+    - rsi
+    - macd
+    - bollinger
+    - ai_filter
+    - sentiment
+  rsi:
+    period: 14
+    oversold: 30
+    overbought: 70
+  macd:
+    fast: 12
+    slow: 26
+    signal: 9
+  bollinger:
+    period: 20
+    std_dev: 2.0
+
+ai:
+  model: claude-opus-4-6
+  max_calls_per_minute: 10
+  analysis_cache_ttl_seconds: 300
+  sentiment_cache_ttl_seconds: 900
+  max_tokens_analysis: 4096
+  max_tokens_sentiment: 1024
+
+risk:
+  max_position_pct: 0.10         # max 10% of portfolio per trade
+  stop_loss_pct: 0.03            # 3% stop-loss
+  trailing_stop_pct: 0.02        # 2% trailing stop
+  max_drawdown_pct: 0.15         # pause trading at 15% drawdown
+  daily_loss_limit_pct: 0.05     # stop trading for day at 5% daily loss
+  max_single_order_usdt: 1000.0  # hard cap per order
+
+logging:
+  level: INFO
+  format: json                   # json | console

@@ -1,0 +1,43 @@
+---
+description: TDD enforcement - every new function/class MUST have tests, every bug fix needs regression test
+alwaysApply: true
+---
+
+# TDD Enforcement
+
+## Mandatory Rules
+
+1. **Every new function or class** MUST have at least one corresponding unit test before it can be considered complete.
+2. **Every bug fix** MUST include a regression test that fails before the fix and passes after.
+3. **Strategy changes** require a test that verifies signal output for known input data.
+4. **Exchange client methods** each need a mock test covering success and error paths.
+5. **Risk manager rules** must be tested with edge cases: zero balance, max drawdown hit, negative PnL, concurrent orders.
+6. **AI response parsing** must be tested with valid JSON, malformed JSON, unexpected fields, and empty responses.
+
+## Workflow
+
+When writing new code:
+1. Write the test first (it should fail)
+2. Write the minimal implementation to pass
+3. Refactor while keeping tests green
+
+When fixing a bug:
+1. Write a test that reproduces the bug (it should fail)
+2. Fix the bug (test passes)
+3. Verify no other tests broke
+
+## What Needs Tests
+
+| Module | Must Test |
+|--------|-----------|
+| exchange/ | Every ABC method, rate limiting, error handling |
+| strategies/ | Signal output for various market conditions |
+| ai/ | Prompt construction, response parsing, rate limiting |
+| risk/ | All rules, edge cases, concurrent access |
+| core/engine | Trading loop, signal aggregation, mode switching |
+| api/ | Every endpoint, auth, WebSocket messages |
+
+## Exceptions
+
+- Config loading and logging setup don't require unit tests
+- Frontend components: tested separately with React Testing Library (not enforced by this rule)

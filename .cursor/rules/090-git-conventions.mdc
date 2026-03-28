@@ -1,0 +1,39 @@
+---
+description: Git conventions - Conventional Commits, atomic commits, branch naming
+alwaysApply: true
+---
+
+# Git Conventions
+
+## Conventional Commits
+
+All commit messages follow the format:
+
+```
+<type>(<scope>): <description>
+
+[optional body]
+```
+
+Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `perf`, `ci`
+
+Scopes: `exchange`, `strategy`, `ai`, `risk`, `api`, `dashboard`, `config`, `core`
+
+Examples:
+- `feat(exchange): add Binance CCXT client with async support`
+- `fix(risk): prevent negative position size on trailing stop`
+- `test(strategy): add RSI oversold/overbought signal tests`
+- `refactor(ai): extract prompt templates to prompts.py`
+
+## Rules
+
+- One logical change per commit — don't mix features with refactors
+- Write the "why" in the body, not just the "what"
+- Never commit `.env`, database files, or API keys
+- Run tests before committing — don't break main
+
+## Branch Naming
+
+- `feat/<short-description>` for features
+- `fix/<short-description>` for bug fixes
+- `refactor/<short-description>` for refactors

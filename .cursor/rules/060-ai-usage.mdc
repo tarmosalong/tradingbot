@@ -1,0 +1,49 @@
+---
+description: Claude AI usage - model config, rate limiting, prompt management, response parsing
+globs: backend/ai/**/*.py
+alwaysApply: false
+---
+
+# Claude AI Usage
+
+## Model Configuration
+
+- Model: `claude-opus-4-6`
+- Use adaptive thinking: `thinking={"type": "adaptive"}`
+- Max tokens: 4096 for analysis, 1024 for sentiment scoring
+- Temperature: 0 for consistent trade decisions
+
+## Client Pattern
+
+Single `ClaudeClient` instance, reused across the app:
+
+```python
+client = anthropic.AsyncAnthropic()  # reads ANTHROPIC_API_KEY from env
+
+response = await client.messages.create(
+    model="claude-opus-4-6",
+    max_tokens=4096,
+    thinking={"type": "adaptive"},
+    messages=[...],
+)
+```
+
+## Prompt Management
+
+- All system prompts live in `backend/ai/prompts.py` as constants
+- Use f-strings or `.format()` for injecting market data — never concatenate
+- Prompts must specify the exact JSON output format expected
+- Include few-shot examples in system prompts for consistent parsing
+
+## Rate Limiting and Caching
+
+- Max 10 Claude API calls per minute (configurable)
+- Cache analysis results with TTL (default 5 min for market analysis, 15 min for sentiment)
+- Use `asyncio.Semaphore` to enforce rate limits
+- Log every API call with token count for cost tracking
+
+## Response Parsing
+
+- Always parse Claude responses as JSON
+- Wrap parsing in try/except — if parsing fails, log the raw response and return HOLD signal
+- Never trust Claude output blindly — validate ranges (confidence 0-1, valid direction enum)

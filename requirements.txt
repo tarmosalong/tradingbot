@@ -1,0 +1,39 @@
+# Exchange
+ccxt>=4.4
+websockets>=14.0
+
+# AI
+anthropic>=0.52
+
+# Data & Indicators
+pandas>=2.2
+pandas-ta>=0.3.14b1
+numpy>=2.0
+
+# Web Framework
+fastapi>=0.115
+uvicorn[standard]>=0.34
+python-multipart>=0.0.18
+
+# Database
+aiosqlite>=0.21
+sqlalchemy[asyncio]>=2.0
+
+# Configuration
+python-dotenv>=1.1
+pyyaml>=6.0
+
+# Logging
+structlog>=25.1
+
+# HTTP client (async)
+aiohttp>=3.11
+
+# Testing
+pytest>=8.3
+pytest-asyncio>=0.25
+pytest-cov>=6.1
+time-machine>=2.16
+
+# Dev tools
+ruff>=0.9

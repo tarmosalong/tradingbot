@@ -1,0 +1,47 @@
+---
+description: Project overview - crypto trading bot architecture, tech stack, directory layout
+alwaysApply: true
+---
+
+# Crypto Trading Bot - Project Overview
+
+## Tech Stack
+
+- **Runtime**: Python 3.12+, asyncio event loop
+- **Exchange**: CCXT (async) — Binance primary, Coinbase future
+- **AI**: Anthropic SDK, model `claude-opus-4-6` with adaptive thinking
+- **Indicators**: pandas-ta (RSI, MACD, Bollinger, EMA, etc.)
+- **Backend**: FastAPI + WebSocket
+- **Frontend**: React (Vite) + TailwindCSS + Lightweight Charts
+- **Database**: SQLite via aiosqlite
+- **Config**: `.env` (secrets) + `config.yaml` (strategy params)
+
+## Directory Layout
+
+```
+backend/
+  main.py           — FastAPI entry point
+  config.py         — Loads .env + config.yaml
+  models.py         — Pydantic + SQLAlchemy models
+  database.py       — DB connection, migrations
+  exchange/          — Exchange abstraction (base, binance, paper)
+  strategies/        — Trading strategies (technical, ai, sentiment)
+  ai/                — Claude client, market analyzer, prompts
+  risk/              — Position sizing, stop-loss, drawdown
+  core/              — Engine, scheduler, logger
+  api/               — REST routes, WebSocket handlers
+frontend/src/        — React dashboard
+tests/               — Mirrors backend/ structure
+```
+
+## Architecture
+
+Signals flow: Data Ingestion → Technical Indicators → Sentiment → Claude AI Filter → Risk Manager → Order Executor → Exchange (Paper or Live)
+
+## Key Conventions
+
+- All I/O operations use async/await
+- Exchange clients implement a shared ABC — paper and live are interchangeable
+- Strategies follow a base class contract returning Signal dataclass
+- Config via `config.yaml`; secrets via `.env` (never committed)
+- Trading mode (`paper` | `live`) set in config.yaml
