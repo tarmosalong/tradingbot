@@ -146,17 +146,30 @@ async def run_backtest(req: BacktestRequest):
     result = await engine.run()
     report = generate_report(result)
 
+    ohlcv_data = [
+        {
+            "time": int(row["timestamp"].timestamp()),
+            "open": float(row["open"]),
+            "high": float(row["high"]),
+            "low": float(row["low"]),
+            "close": float(row["close"]),
+            "volume": float(row["volume"]),
+        }
+        for _, row in ohlcv.iterrows()
+    ]
+
     return {
         "report": report.to_dict(),
         "equity_curve": result.equity_curve,
         "timestamps": result.timestamps,
+        "ohlcv": ohlcv_data,
         "trades": [
             {
                 "symbol": bt.trade.symbol,
-                "side": bt.trade.side.value,
+                "side": bt.trade.side.value if hasattr(bt.trade.side, "value") else bt.trade.side,
                 "amount": bt.trade.amount,
                 "price": bt.trade.price,
-                "executed_at": bt.trade.executed_at.isoformat(),
+                "executed_at": bt.trade.executed_at.isoformat() if bt.trade.executed_at else "",
                 "portfolio_value": bt.portfolio_value,
             }
             for bt in result.trades
