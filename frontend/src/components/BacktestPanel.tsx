@@ -101,6 +101,15 @@ export function BacktestPanel() {
   };
 
   const runBacktest = async () => {
+    if (!start || !end) {
+      setError('Start and end dates are required');
+      return;
+    }
+    if (!symbol) {
+      setError('Symbol is required');
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setResult(null);
@@ -131,6 +140,11 @@ export function BacktestPanel() {
           },
         }),
       });
+      if (!res.ok) {
+        const text = await res.text();
+        setError(`Server error (${res.status}): ${text.slice(0, 200)}`);
+        return;
+      }
       const data = await res.json();
       if (data.error) {
         setError(data.error);

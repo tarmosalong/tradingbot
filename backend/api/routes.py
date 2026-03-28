@@ -134,12 +134,18 @@ async def run_backtest(req: BacktestRequest):
     )
     from backend.strategies import STRATEGY_REGISTRY
 
-    start_dt = datetime.strptime(req.start, "%Y-%m-%d").replace(
-        tzinfo=UTC,
-    )
-    end_dt = datetime.strptime(req.end, "%Y-%m-%d").replace(
-        tzinfo=UTC,
-    )
+    if not req.start or not req.end:
+        return {"error": "Start and end dates are required (YYYY-MM-DD)"}
+
+    try:
+        start_dt = datetime.strptime(req.start, "%Y-%m-%d").replace(
+            tzinfo=UTC,
+        )
+        end_dt = datetime.strptime(req.end, "%Y-%m-%d").replace(
+            tzinfo=UTC,
+        )
+    except ValueError:
+        return {"error": "Invalid date format. Use YYYY-MM-DD"}
 
     ohlcv = await load_from_binance(
         req.symbol, req.timeframe, start_dt, end_dt,
