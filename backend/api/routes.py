@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from fastapi import APIRouter
+from pydantic import BaseModel
 
 from backend.api.deps import get_database
 from backend.config import load_settings
@@ -78,3 +81,84 @@ async def get_portfolio(limit: int = 100):
     db = get_database()
     history = await db.get_portfolio_history(limit=limit)
     return history
+
+
+class BacktestRequest(BaseModel):
+    symbol: str = "BTC/USDT"
+    timeframe: str = "1h"
+    start: str = "2025-01-01"
+    end: str = "2025-12-31"
+    balance: float = 10000.0
+    strategies: list[str] = ["rsi", "macd", "bollinger"]
+
+
+@router.post("/backtest")
+async def run_backtest(req: BacktestRequest):
+    from backend.backtest.data_loader import load_from_binance
+    from backend.backtest.engine import BacktestEngine
+    from backend.backtest.exchange import BacktestExchange
+    from backend.backtest.report import generate_report
+    from backend.strategies import STRATEGY_REGISTRY
+
+    settings = load_settings()
+
+    start_dt = datetime.strptime(req.start, "%Y-%m-%d").replace(
+        tzinfo=UTC,
+    )
+    end_dt = datetime.strptime(req.end, "%Y-%m-%d").replace(
+        tzinfo=UTC,
+    )
+
+    ohlcv = await load_from_binance(
+        req.symbol, req.timeframe, start_dt, end_dt,
+    )
+    if ohlcv.empty:
+        return {"error": "No data loaded for the given period"}
+
+    exchange = BacktestExchange(
+        ohlcv=ohlcv,
+        initial_balance_usdt=req.balance,
+        symbol=req.symbol,
+    )
+
+    config_map = {
+        "rsi": settings.strategies.rsi,
+        "macd": settings.strategies.macd,
+        "bollinger": settings.strategies.bollinger,
+    }
+    strats = []
+    for name in req.strategies:
+        cls = STRATEGY_REGISTRY.get(name)
+        if cls:
+            cfg = config_map.get(name)
+            strats.append(cls(cfg) if cfg else cls())
+
+    if not strats:
+        return {"error": "No valid strategies provided"}
+
+    engine = BacktestEngine(
+        exchange=exchange,
+        strategies=strats,
+        symbol=req.symbol,
+        risk_config=settings.risk,
+    )
+
+    result = await engine.run()
+    report = generate_report(result)
+
+    return {
+        "report": report.to_dict(),
+        "equity_curve": result.equity_curve,
+        "timestamps": result.timestamps,
+        "trades": [
+            {
+                "symbol": bt.trade.symbol,
+                "side": bt.trade.side.value,
+                "amount": bt.trade.amount,
+                "price": bt.trade.price,
+                "executed_at": bt.trade.executed_at.isoformat(),
+                "portfolio_value": bt.portfolio_value,
+            }
+            for bt in result.trades
+        ],
+    }

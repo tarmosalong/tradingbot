@@ -49,6 +49,12 @@ risk:
   daily_loss_limit_pct: 0.05     # stop trading for day at 5% daily loss
   max_single_order_usdt: 1000.0  # hard cap per order
 
+backtest:
+  default_start: "2025-01-01"
+  default_end: "2025-12-31"
+  default_balance: 10000.0
+  data_cache_dir: data/cache
+
 logging:
   level: INFO
   format: json                   # json | console

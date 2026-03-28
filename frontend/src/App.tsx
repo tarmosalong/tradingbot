@@ -7,8 +7,12 @@ import { StatsPanel } from './components/StatsPanel';
 import { PortfolioChart } from './components/PortfolioChart';
 import { TradesTable } from './components/TradesTable';
 import { ConfigPanel } from './components/ConfigPanel';
+import { BacktestPanel } from './components/BacktestPanel';
+
+type Tab = 'dashboard' | 'backtest';
 
 function App() {
+  const [tab, setTab] = useState<Tab>('dashboard');
   const [trades, setTrades] = useState<Trade[]>([]);
   const [portfolio, setPortfolio] = useState<PortfolioSnapshot[]>([]);
   const [config, setConfig] = useState<BotConfig | null>(null);
@@ -49,31 +53,67 @@ function App() {
     <div className="min-h-screen flex flex-col">
       <Header mode={config?.mode ?? '...'} connected={connected} />
 
-      <main className="flex-1 p-6 max-w-7xl mx-auto w-full space-y-6">
-        {error && (
+      <nav className="flex gap-1 px-6 pt-4 pb-2">
+        <TabButton active={tab === 'dashboard'} onClick={() => setTab('dashboard')}>
+          Dashboard
+        </TabButton>
+        <TabButton active={tab === 'backtest'} onClick={() => setTab('backtest')}>
+          Backtest
+        </TabButton>
+      </nav>
+
+      <main className="flex-1 p-6 pt-2 max-w-7xl mx-auto w-full space-y-6">
+        {error && tab === 'dashboard' && (
           <div className="bg-[var(--accent-red)]/10 border border-[var(--accent-red)]/30 rounded-lg px-4 py-3 text-sm text-[var(--accent-red)]">
             {error}
           </div>
         )}
 
-        <StatsPanel portfolio={portfolio} trades={trades} />
+        {tab === 'dashboard' && (
+          <>
+            <StatsPanel portfolio={portfolio} trades={trades} />
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="lg:col-span-2">
+                <PortfolioChart data={portfolio} />
+              </div>
+              <div>
+                <ConfigPanel config={config} />
+              </div>
+            </div>
+            <TradesTable trades={trades} />
+          </>
+        )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2">
-            <PortfolioChart data={portfolio} />
-          </div>
-          <div>
-            <ConfigPanel config={config} />
-          </div>
-        </div>
-
-        <TradesTable trades={trades} />
+        {tab === 'backtest' && <BacktestPanel />}
       </main>
 
       <footer className="px-6 py-3 border-t border-[var(--border)] text-center text-xs text-[var(--text-secondary)]">
         Trading Bot Dashboard &middot; {config?.pairs?.join(' · ') ?? '...'} &middot; {config?.timeframe ?? '...'}
       </footer>
     </div>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors cursor-pointer ${
+        active
+          ? 'bg-[var(--bg-card)] text-[var(--text-primary)] border border-b-0 border-[var(--border)]'
+          : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 

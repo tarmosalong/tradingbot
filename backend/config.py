@@ -73,6 +73,14 @@ class RiskConfig:
 
 
 @dataclass(frozen=True)
+class BacktestConfig:
+    default_start: str = "2025-01-01"
+    default_end: str = "2025-12-31"
+    default_balance: float = 10_000.0
+    data_cache_dir: str = "data/cache"
+
+
+@dataclass(frozen=True)
 class TradingConfig:
     mode: str = "paper"
     pairs: list[str] = field(default_factory=lambda: ["BTC/USDT", "ETH/USDT"])
@@ -88,6 +96,7 @@ class Settings:
     strategies: StrategiesConfig = field(default_factory=StrategiesConfig)
     ai: AIConfig = field(default_factory=AIConfig)
     risk: RiskConfig = field(default_factory=RiskConfig)
+    backtest: BacktestConfig = field(default_factory=BacktestConfig)
 
     binance_api_key: str = ""
     binance_api_secret: str = ""
@@ -143,6 +152,7 @@ def load_settings(config_path: str | Path | None = None) -> Settings:
     strategies = _build_nested(StrategiesConfig, raw.get("strategies", {}))
     ai = _build_nested(AIConfig, raw.get("ai", {}))
     risk = _build_nested(RiskConfig, raw.get("risk", {}))
+    backtest = _build_nested(BacktestConfig, raw.get("backtest", {}))
 
     mode_override = os.getenv("TRADING_MODE")
     if mode_override:
@@ -160,6 +170,7 @@ def load_settings(config_path: str | Path | None = None) -> Settings:
         strategies=strategies,
         ai=ai,
         risk=risk,
+        backtest=backtest,
         binance_api_key=os.getenv("BINANCE_API_KEY", ""),
         binance_api_secret=os.getenv("BINANCE_API_SECRET", ""),
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
