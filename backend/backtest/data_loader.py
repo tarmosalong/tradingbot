@@ -62,7 +62,10 @@ async def load_from_binance(
         all_rows, columns=["timestamp", "open", "high", "low", "close", "volume"]
     )
     df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
-    df = df[df["timestamp"] <= pd.Timestamp(end, tz="UTC")]
+    end_ts = pd.Timestamp(end)
+    if end_ts.tzinfo is None:
+        end_ts = end_ts.tz_localize("UTC")
+    df = df[df["timestamp"] <= end_ts]
     df = df.drop_duplicates(subset="timestamp").reset_index(drop=True)
 
     logger.info(
