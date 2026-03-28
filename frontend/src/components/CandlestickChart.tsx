@@ -1,5 +1,13 @@
 import { useEffect, useRef } from 'react';
-import { createChart, ColorType, CrosshairMode } from 'lightweight-charts';
+import {
+  createChart,
+  createSeriesMarkers,
+  ColorType,
+  CrosshairMode,
+  CandlestickSeries,
+  HistogramSeries,
+  LineSeries,
+} from 'lightweight-charts';
 import type {
   IChartApi,
   ISeriesApi,
@@ -31,15 +39,13 @@ interface CandlestickChartProps {
   equityCurve?: number[];
 }
 
-const CHART_COLORS = {
+const COLORS = {
   bg: '#0f1117',
   text: '#8b8fa3',
   grid: '#1a1d2e',
   border: '#262a3a',
   upCandle: '#22c55e',
   downCandle: '#ef4444',
-  upWick: '#22c55e',
-  downWick: '#ef4444',
   volumeUp: 'rgba(34, 197, 94, 0.15)',
   volumeDown: 'rgba(239, 68, 68, 0.15)',
   equityLine: '#3b82f6',
@@ -48,46 +54,46 @@ const CHART_COLORS = {
 export function CandlestickChart({ ohlcv, trades, equityCurve }: CandlestickChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const candleRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
 
   useEffect(() => {
     if (!containerRef.current || ohlcv.length === 0) return;
 
-    const container = containerRef.current;
+    const el = containerRef.current;
 
-    const chart = createChart(container, {
-      width: container.clientWidth,
+    const chart = createChart(el, {
+      width: el.clientWidth,
       height: 420,
       layout: {
-        background: { type: ColorType.Solid, color: CHART_COLORS.bg },
-        textColor: CHART_COLORS.text,
+        background: { type: ColorType.Solid, color: COLORS.bg },
+        textColor: COLORS.text,
         fontFamily: "'Inter', system-ui, sans-serif",
       },
       grid: {
-        vertLines: { color: CHART_COLORS.grid },
-        horzLines: { color: CHART_COLORS.grid },
+        vertLines: { color: COLORS.grid },
+        horzLines: { color: COLORS.grid },
       },
       crosshair: { mode: CrosshairMode.Normal },
       rightPriceScale: {
-        borderColor: CHART_COLORS.border,
+        borderColor: COLORS.border,
         scaleMargins: { top: 0.05, bottom: 0.25 },
       },
       timeScale: {
-        borderColor: CHART_COLORS.border,
+        borderColor: COLORS.border,
         timeVisible: true,
         secondsVisible: false,
       },
     });
     chartRef.current = chart;
 
-    const candleSeries = chart.addCandlestickSeries({
-      upColor: CHART_COLORS.upCandle,
-      downColor: CHART_COLORS.downCandle,
-      wickUpColor: CHART_COLORS.upWick,
-      wickDownColor: CHART_COLORS.downWick,
+    const candleSeries = chart.addSeries(CandlestickSeries, {
+      upColor: COLORS.upCandle,
+      downColor: COLORS.downCandle,
+      wickUpColor: COLORS.upCandle,
+      wickDownColor: COLORS.downCandle,
       borderVisible: false,
     });
-    candleSeriesRef.current = candleSeries;
+    candleRef.current = candleSeries;
 
     const candleData: CandlestickData<Time>[] = ohlcv.map((c) => ({
       time: c.time as Time,
@@ -98,11 +104,10 @@ export function CandlestickChart({ ohlcv, trades, equityCurve }: CandlestickChar
     }));
     candleSeries.setData(candleData);
 
-    const volumeSeries = chart.addHistogramSeries({
+    const volumeSeries = chart.addSeries(HistogramSeries, {
       priceFormat: { type: 'volume' },
       priceScaleId: 'volume',
     });
-
     chart.priceScale('volume').applyOptions({
       scaleMargins: { top: 0.8, bottom: 0 },
     });
@@ -110,72 +115,68 @@ export function CandlestickChart({ ohlcv, trades, equityCurve }: CandlestickChar
     const volumeData: HistogramData<Time>[] = ohlcv.map((c) => ({
       time: c.time as Time,
       value: c.volume,
-      color: c.close >= c.open ? CHART_COLORS.volumeUp : CHART_COLORS.volumeDown,
+      color: c.close >= c.open ? COLORS.volumeUp : COLORS.volumeDown,
     }));
     volumeSeries.setData(volumeData);
 
-    if (equityCurve && equityCurve.length > 0 && equityCurve.length <= ohlcv.length) {
-      const equitySeries = chart.addLineSeries({
-        color: CHART_COLORS.equityLine,
+    if (equityCurve && equityCurve.length > 0) {
+      const equitySeries = chart.addSeries(LineSeries, {
+        color: COLORS.equityLine,
         lineWidth: 2,
         priceScaleId: 'equity',
         lastValueVisible: true,
         priceLineVisible: false,
       });
-
       chart.priceScale('equity').applyOptions({
         scaleMargins: { top: 0.05, bottom: 0.25 },
         visible: false,
       });
 
-      const equityData = equityCurve.map((value, i) => ({
-        time: ohlcv[Math.min(i, ohlcv.length - 1)].time as Time,
-        value,
-      }));
-      equitySeries.setData(equityData);
+      const eqData = equityCurve
+        .slice(0, ohlcv.length)
+        .map((value, i) => ({
+          time: ohlcv[i].time as Time,
+          value,
+        }));
+      equitySeries.setData(eqData);
     }
 
     if (trades.length > 0) {
-      const ohlcvTimeSet = new Set(ohlcv.map((c) => c.time));
+      const timeSet = new Set(ohlcv.map((c) => c.time));
 
       const markers: SeriesMarker<Time>[] = trades
-        .filter((t) => ohlcvTimeSet.has(t.time))
+        .filter((t) => timeSet.has(t.time))
         .map((t) => ({
           time: t.time as Time,
-          position: t.side === 'BUY' ? 'belowBar' as const : 'aboveBar' as const,
+          position: t.side === 'BUY' ? ('belowBar' as const) : ('aboveBar' as const),
           color: t.side === 'BUY' ? '#22c55e' : '#ef4444',
-          shape: t.side === 'BUY' ? 'arrowUp' as const : 'arrowDown' as const,
+          shape: t.side === 'BUY' ? ('arrowUp' as const) : ('arrowDown' as const),
           text: `${t.side} ${t.amount.toFixed(4)} @ $${t.price.toLocaleString()}`,
         }))
         .sort((a, b) => (a.time as number) - (b.time as number));
 
-      candleSeries.setMarkers(markers);
+      createSeriesMarkers(candleSeries, markers);
     }
 
     chart.timeScale().fitContent();
 
-    const handleResize = () => {
-      if (container) {
-        chart.applyOptions({ width: container.clientWidth });
-      }
-    };
-    const resizeObserver = new ResizeObserver(handleResize);
-    resizeObserver.observe(container);
+    const ro = new ResizeObserver(() => {
+      chart.applyOptions({ width: el.clientWidth });
+    });
+    ro.observe(el);
 
     return () => {
-      resizeObserver.disconnect();
+      ro.disconnect();
       chart.remove();
       chartRef.current = null;
-      candleSeriesRef.current = null;
+      candleRef.current = null;
     };
   }, [ohlcv, trades, equityCurve]);
 
   return (
     <div className="bg-[var(--bg-card)] rounded-lg border border-[var(--border)] overflow-hidden">
       <div className="flex items-center justify-between px-4 pt-3 pb-2">
-        <h2 className="text-sm font-medium text-[var(--text-secondary)]">
-          Price Chart
-        </h2>
+        <h2 className="text-sm font-medium text-[var(--text-secondary)]">Price Chart</h2>
         <div className="flex items-center gap-3 text-xs text-[var(--text-secondary)]">
           <span className="flex items-center gap-1">
             <span className="w-2 h-2 rounded-full bg-[#22c55e] inline-block" />

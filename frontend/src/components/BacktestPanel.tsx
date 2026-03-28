@@ -45,17 +45,37 @@ interface BacktestResult {
   trades: BacktestTrade[];
 }
 
+const AVAILABLE_STRATEGIES = [
+  { id: 'rsi', label: 'RSI', description: 'Relative Strength Index' },
+  { id: 'macd', label: 'MACD', description: 'Moving Average Convergence Divergence' },
+  { id: 'bollinger', label: 'Bollinger', description: 'Bollinger Bands' },
+] as const;
+
 export function BacktestPanel() {
   const [symbol, setSymbol] = useState('BTC/USDT');
   const [timeframe, setTimeframe] = useState('1h');
   const [start, setStart] = useState('2025-01-01');
   const [end, setEnd] = useState('2025-06-30');
   const [balance, setBalance] = useState('10000');
-  const [strategies, setStrategies] = useState('rsi,macd,bollinger');
+  const [enabledStrategies, setEnabledStrategies] = useState<Set<string>>(
+    new Set(['rsi', 'macd', 'bollinger']),
+  );
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
+
+  const toggleStrategy = (id: string) => {
+    setEnabledStrategies((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        if (next.size > 1) next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
 
   const runBacktest = async () => {
     setLoading(true);
@@ -76,7 +96,7 @@ export function BacktestPanel() {
           start,
           end,
           balance: parseFloat(balance),
-          strategies: strategies.split(',').map((s) => s.trim()),
+          strategies: Array.from(enabledStrategies),
         }),
       });
       const data = await res.json();
@@ -118,7 +138,7 @@ export function BacktestPanel() {
         <h2 className="text-sm font-medium text-[var(--text-secondary)] mb-3">
           Run Backtest
         </h2>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
           <div>
             <label className="block text-xs text-[var(--text-secondary)] mb-1">Symbol</label>
             <input
@@ -159,20 +179,35 @@ export function BacktestPanel() {
             />
           </div>
           <div>
-            <label className="block text-xs text-[var(--text-secondary)] mb-1">Balance</label>
+            <label className="block text-xs text-[var(--text-secondary)] mb-1">Balance (USDT)</label>
             <input
               value={balance}
               onChange={(e) => setBalance(e.target.value)}
               className="w-full bg-[var(--bg-secondary)] border border-[var(--border)] rounded px-2 py-1.5 text-sm"
             />
           </div>
-          <div>
-            <label className="block text-xs text-[var(--text-secondary)] mb-1">Strategies</label>
-            <input
-              value={strategies}
-              onChange={(e) => setStrategies(e.target.value)}
-              className="w-full bg-[var(--bg-secondary)] border border-[var(--border)] rounded px-2 py-1.5 text-sm"
-            />
+        </div>
+
+        <div className="mt-3">
+          <label className="block text-xs text-[var(--text-secondary)] mb-2">Strategies</label>
+          <div className="flex flex-wrap gap-2">
+            {AVAILABLE_STRATEGIES.map((s) => {
+              const active = enabledStrategies.has(s.id);
+              return (
+                <button
+                  key={s.id}
+                  onClick={() => toggleStrategy(s.id)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all cursor-pointer border ${
+                    active
+                      ? 'bg-[var(--accent-blue)]/15 border-[var(--accent-blue)] text-[var(--accent-blue)]'
+                      : 'bg-[var(--bg-secondary)] border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--text-secondary)]'
+                  }`}
+                  title={s.description}
+                >
+                  {active ? '\u2713 ' : ''}{s.label}
+                </button>
+              );
+            })}
           </div>
         </div>
         <div className="flex items-center gap-3 mt-3">
