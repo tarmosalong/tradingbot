@@ -1,0 +1,24 @@
+---
+description: Always commit after significant code changes - never leave large uncommitted work
+alwaysApply: true
+---
+
+# Commit After Changes
+
+After every significant code change (new module, feature, refactor, bug fix, or completing a phase), create a git commit immediately. Do not accumulate large uncommitted changes.
+
+## When to Commit
+
+- After completing a phase or milestone
+- After adding a new module or feature
+- After a refactor that touches multiple files
+- After fixing a bug (include the regression test in the same commit)
+- After adding or updating tests for existing code
+
+## Commit Checklist
+
+1. Run tests (`pytest`) — all must pass
+2. Run linter (`ruff check`) — no errors
+3. Stage relevant files
+4. Write a Conventional Commit message (see 090-git-conventions)
+5. Verify clean working tree after commit
