@@ -71,7 +71,11 @@ export function PositionsPanel({ trades, refreshTrigger }: PositionsPanelProps) 
           {hasPositions && (
             <div className="divide-y divide-[var(--border)]">
               {positions.map((pos) => (
-                <PositionRow key={pos.symbol} position={pos} />
+                <PositionRow
+                  key={pos.symbol}
+                  position={pos}
+                  fills={trades.filter((t) => t.symbol === pos.symbol && t.side === 'BUY')}
+                />
               ))}
             </div>
           )}
@@ -170,11 +174,12 @@ export function PositionsPanel({ trades, refreshTrigger }: PositionsPanelProps) 
   );
 }
 
-function PositionRow({ position: pos }: { position: OpenPosition }) {
+function PositionRow({ position: pos, fills }: { position: OpenPosition; fills: Trade[] }) {
   const pnlColor = pos.pnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
   const priceDropToSl = ((pos.current_price - pos.stop_loss_price) / pos.current_price) * 100;
   const priceDropToTs = ((pos.current_price - pos.trailing_stop_price) / pos.current_price) * 100;
   const nearestExit = Math.min(priceDropToSl, priceDropToTs);
+  const totalCost = pos.amount * pos.entry_price;
 
   return (
     <div className="px-4 py-4 space-y-3">
@@ -184,6 +189,11 @@ function PositionRow({ position: pos }: { position: OpenPosition }) {
           <span className="text-xs text-[var(--text-secondary)]">
             {pos.amount.toFixed(6)} @ ${pos.entry_price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </span>
+          {fills.length > 1 && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--bg-secondary)] text-[var(--text-secondary)]">
+              avg of {fills.length} buys
+            </span>
+          )}
         </div>
         <div className="text-right">
           <span className="font-mono text-sm" style={{ color: pnlColor }}>
@@ -196,10 +206,31 @@ function PositionRow({ position: pos }: { position: OpenPosition }) {
       </div>
 
       <div className="grid grid-cols-3 gap-3 text-xs">
-        <PriceInfo label="Entry" value={pos.entry_price} />
+        <PriceInfo label="Avg Entry" value={pos.entry_price} sub={`$${totalCost.toLocaleString(undefined, { maximumFractionDigits: 2 })} total`} />
         <PriceInfo label="Current" value={pos.current_price} />
         <PriceInfo label="Peak" value={pos.peak_price} highlight />
       </div>
+
+      {/* Individual fills breakdown */}
+      {fills.length > 1 && (
+        <div className="rounded-lg bg-[var(--bg-secondary)]/40 px-3 py-2">
+          <p className="text-[10px] font-medium text-[var(--text-secondary)] uppercase tracking-wider mb-1.5">
+            Buy fills
+          </p>
+          <div className="space-y-1">
+            {fills.map((f, i) => (
+              <div key={f.id ?? i} className="flex items-center justify-between text-xs">
+                <span className="text-[var(--text-secondary)]">
+                  {new Date(f.executed_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                </span>
+                <span className="font-mono text-[var(--text-primary)]">
+                  {f.amount.toFixed(6)} @ ${f.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="space-y-2">
         <p className="text-xs font-medium text-[var(--text-secondary)] uppercase tracking-wider">
@@ -237,13 +268,14 @@ function PositionRow({ position: pos }: { position: OpenPosition }) {
   );
 }
 
-function PriceInfo({ label, value, highlight }: { label: string; value: number; highlight?: boolean }) {
+function PriceInfo({ label, value, highlight, sub }: { label: string; value: number; highlight?: boolean; sub?: string }) {
   return (
     <div className="rounded-lg bg-[var(--bg-secondary)] px-2.5 py-1.5">
       <p className="text-[var(--text-secondary)] text-[10px] uppercase tracking-wider">{label}</p>
       <p className={`font-mono text-sm ${highlight ? 'text-[var(--accent-green)]' : 'text-[var(--text-primary)]'}`}>
         ${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
       </p>
+      {sub && <p className="text-[10px] text-[var(--text-secondary)] mt-0.5">{sub}</p>}
     </div>
   );
 }
