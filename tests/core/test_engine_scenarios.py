@@ -20,6 +20,7 @@ from backend.config import (
     load_settings,
 )
 from backend.core.engine import OpenPosition, TradingEngine
+from backend.core.exceptions import ExchangeError
 from backend.database import Database
 from backend.models import (
     Order,
@@ -1889,3 +1890,751 @@ class TestPortfolioSnapshotAfterTrade:
 
         history = await db.get_portfolio_history()
         assert len(history) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Slippage scenarios (Medium: realistic execution simulation)
+# ---------------------------------------------------------------------------
+
+
+class TestSlippageScenario:
+    """Order fills at a worse price than expected (slippage)."""
+
+    async def test_buy_fills_above_expected_price(self, db):
+        """Exchange fills BUY order 0.5% above ticker.last (slippage).
+        Position entry_price should use the actual fill price, not ticker.
+        """
+        s = _scenario_settings()
+        exchange = AsyncMock()
+        ohlcv = _ohlcv_with_trend(60, start_price=60000.0, step=100.0)
+        expected = float(ohlcv["close"].iloc[-1])
+        slipped = expected * 1.005
+
+        exchange.get_ohlcv.return_value = ohlcv
+        exchange.get_balance.return_value = {"USDT": 10000.0, "BTC": 0.0}
+        exchange.get_ticker.return_value = Ticker(
+            symbol="BTC/USDT", bid=expected, ask=expected + 10, last=expected,
+        )
+        exchange.create_order.return_value = _make_order(
+            "BUY", 0.015, slipped,
+        )
+
+        engine = TradingEngine(
+            settings=s, exchange=exchange, database=db,
+            strategies=[_strategy_returning("BUY", 0.8)],
+        )
+        await engine._tick()
+
+        pos = engine._positions["BTC/USDT"]
+        assert pos.entry_price == slipped, "Position must use actual fill price"
+        assert pos.atr_stop_loss < slipped
+        assert pos.atr_take_profit > slipped
+
+        trades = await db.get_trades()
+        assert trades[0].price == slipped
+
+    async def test_sell_fills_below_expected_trailing_stop(self, db):
+        """SELL triggered by trailing stop fills below the trigger price.
+        Trade record should show actual fill, not the stop price.
+        """
+        s = _scenario_settings()
+        exchange = AsyncMock()
+        entry = 65000.0
+        usdt_after = 10000.0 - 0.1 * entry
+
+        pos = OpenPosition(
+            symbol="BTC/USDT", amount=0.1,
+            entry_price=entry, peak_price=66000.0,
+            atr_at_entry=200.0, atr_stop_loss=64600.0,
+            atr_take_profit=66600.0, atr_trailing_multiplier=1.5,
+        )
+        pos.set_risk(0.03, 0.02)
+
+        ts = pos.trailing_stop_price
+        trigger_price = ts - 20
+        slipped_fill = trigger_price - 50
+
+        exchange.get_ticker.return_value = Ticker(
+            symbol="BTC/USDT", bid=trigger_price, ask=trigger_price + 10,
+            last=trigger_price,
+        )
+        exchange.get_balance.return_value = {"USDT": usdt_after, "BTC": 0.1}
+        exchange.create_order.return_value = _make_order(
+            "SELL", 0.1, slipped_fill, "o-ts",
+        )
+
+        engine = TradingEngine(
+            settings=s, exchange=exchange, database=db,
+            strategies=[],
+        )
+        engine._positions["BTC/USDT"] = pos
+
+        await engine._check_position_exit("BTC/USDT")
+
+        assert "BTC/USDT" not in engine._positions
+        trades = await db.get_trades()
+        assert trades[0].price == slipped_fill
+
+
+# ---------------------------------------------------------------------------
+# Whipsaw / wick scenarios (Medium: anti-wick, price touches SL then recovers)
+# ---------------------------------------------------------------------------
+
+
+class TestWhipsawScenario:
+    """Price briefly touches SL then recovers — tests precise SL boundary.
+
+    Uses atr_trailing_multiplier=3.0 so trailing stop (entry - ATR*3 = 64400)
+    is below ATR SL (64600), ensuring only SL can fire at the boundary.
+    """
+
+    def _make_position(self):
+        pos = OpenPosition(
+            symbol="BTC/USDT", amount=0.1,
+            entry_price=65000.0, peak_price=65000.0,
+            atr_at_entry=200.0, atr_stop_loss=64600.0,
+            atr_take_profit=66500.0, atr_trailing_multiplier=3.0,
+        )
+        pos.set_risk(0.03, 0.02)
+        assert pos.trailing_stop_price < pos.stop_loss_price, \
+            "TS must be below SL for whipsaw boundary tests"
+        return pos
+
+    async def test_price_just_above_sl_no_exit(self, db):
+        """Price drops to 1 cent above SL — must NOT trigger exit."""
+        s = _scenario_settings()
+        exchange = AsyncMock()
+        exchange.get_balance.return_value = {"USDT": 9000.0, "BTC": 0.1}
+
+        pos = self._make_position()
+        sl = pos.stop_loss_price
+
+        engine = TradingEngine(
+            settings=s, exchange=exchange, database=db,
+            strategies=[],
+        )
+        engine._positions["BTC/USDT"] = pos
+
+        just_above = sl + 0.01
+        exchange.get_ticker.return_value = Ticker(
+            symbol="BTC/USDT", bid=just_above, ask=just_above + 10,
+            last=just_above,
+        )
+        exited = await engine._check_position_exit("BTC/USDT")
+        assert exited is False
+
+    async def test_price_exactly_at_sl_triggers(self, db):
+        """Price drops to exactly SL — MUST trigger exit."""
+        s = _scenario_settings()
+        exchange = AsyncMock()
+
+        pos = self._make_position()
+        sl = pos.stop_loss_price
+
+        engine = TradingEngine(
+            settings=s, exchange=exchange, database=db,
+            strategies=[],
+        )
+        engine._positions["BTC/USDT"] = pos
+
+        exchange.get_ticker.return_value = Ticker(
+            symbol="BTC/USDT", bid=sl, ask=sl + 10, last=sl,
+        )
+        exchange.get_balance.return_value = {"USDT": 9000.0, "BTC": 0.1}
+        exchange.create_order.return_value = _make_order(
+            "SELL", 0.1, sl, "o-sl",
+        )
+        exited = await engine._check_position_exit("BTC/USDT")
+        assert exited is True
+
+    async def test_wick_touches_sl_then_recovers(self, db):
+        """Tick 1: price at SL (exits). This tests that our engine IS
+        vulnerable to wicks — important to document this known limitation.
+        """
+        s = _scenario_settings()
+        exchange = AsyncMock()
+
+        pos = self._make_position()
+        sl = pos.stop_loss_price
+
+        engine = TradingEngine(
+            settings=s, exchange=exchange, database=db,
+            strategies=[],
+        )
+        engine._positions["BTC/USDT"] = pos
+
+        exchange.get_ticker.return_value = Ticker(
+            symbol="BTC/USDT", bid=sl, ask=sl + 10, last=sl,
+        )
+        exchange.get_balance.return_value = {"USDT": 9000.0, "BTC": 0.1}
+        exchange.create_order.return_value = _make_order(
+            "SELL", 0.1, sl, "o-sl",
+        )
+        exited = await engine._check_position_exit("BTC/USDT")
+        assert exited is True, "Engine exits on wick — known limitation"
+
+
+# ---------------------------------------------------------------------------
+# Flash crash scenario (Medium: extreme volatility)
+# ---------------------------------------------------------------------------
+
+
+class TestFlashCrashScenario:
+    """Extreme price drop that blows through SL in one tick."""
+
+    async def test_price_gaps_far_below_sl(self, db):
+        """Price drops 10% in one tick (far past SL). Exit should still fire."""
+        s = _scenario_settings()
+        exchange = AsyncMock()
+        entry = 65000.0
+        usdt_after = 10000.0 - 0.1 * entry
+
+        pos = OpenPosition(
+            symbol="BTC/USDT", amount=0.1,
+            entry_price=entry, peak_price=entry,
+            atr_at_entry=200.0, atr_stop_loss=64600.0,
+            atr_take_profit=66500.0, atr_trailing_multiplier=1.5,
+        )
+        pos.set_risk(0.03, 0.02)
+
+        crash_price = entry * 0.90
+        exchange.get_ticker.return_value = Ticker(
+            symbol="BTC/USDT", bid=crash_price, ask=crash_price + 10,
+            last=crash_price,
+        )
+        exchange.get_balance.return_value = {"USDT": usdt_after, "BTC": 0.1}
+        exchange.create_order.return_value = _make_order(
+            "SELL", 0.1, crash_price, "o-crash",
+        )
+
+        engine = TradingEngine(
+            settings=s, exchange=exchange, database=db,
+            strategies=[],
+        )
+        engine._positions["BTC/USDT"] = pos
+
+        exited = await engine._check_position_exit("BTC/USDT")
+        assert exited is True
+        assert "BTC/USDT" not in engine._positions
+
+        trades = await db.get_trades()
+        loss = (crash_price - entry) * 0.1
+        assert trades[0].price == crash_price
+        assert loss < 0
+
+
+# ---------------------------------------------------------------------------
+# Near-miss take-profit (Medium: price reaches 99% of TP then reverses)
+# ---------------------------------------------------------------------------
+
+
+class TestNearMissTPScenario:
+    """Price gets very close to TP but doesn't reach it — no exit."""
+
+    async def test_price_just_below_tp_no_exit(self, db):
+        s = _scenario_settings()
+        exchange = AsyncMock()
+        exchange.get_balance.return_value = {"USDT": 9000.0, "BTC": 0.1}
+
+        pos = OpenPosition(
+            symbol="BTC/USDT", amount=0.1,
+            entry_price=65000.0, peak_price=65000.0,
+            atr_at_entry=200.0, atr_stop_loss=64600.0,
+            atr_take_profit=66500.0, atr_trailing_multiplier=1.5,
+        )
+        pos.set_risk(0.03, 0.02)
+
+        engine = TradingEngine(
+            settings=s, exchange=exchange, database=db,
+            strategies=[],
+        )
+        engine._positions["BTC/USDT"] = pos
+
+        near_tp = pos.atr_take_profit - 0.01
+        exchange.get_ticker.return_value = Ticker(
+            symbol="BTC/USDT", bid=near_tp, ask=near_tp + 10, last=near_tp,
+        )
+        exited = await engine._check_position_exit("BTC/USDT")
+        assert exited is False
+        assert pos.partial_exits_done == 0
+
+    async def test_price_at_tp_triggers_partial(self, db):
+        s = _scenario_settings()
+        exchange = AsyncMock()
+
+        pos = OpenPosition(
+            symbol="BTC/USDT", amount=0.1,
+            entry_price=65000.0, peak_price=65000.0,
+            atr_at_entry=200.0, atr_stop_loss=64600.0,
+            atr_take_profit=66500.0, atr_trailing_multiplier=1.5,
+        )
+        pos.set_risk(0.03, 0.02)
+        tp = pos.atr_take_profit
+
+        engine = TradingEngine(
+            settings=s, exchange=exchange, database=db,
+            strategies=[],
+        )
+        engine._positions["BTC/USDT"] = pos
+
+        exchange.get_ticker.return_value = Ticker(
+            symbol="BTC/USDT", bid=tp, ask=tp + 10, last=tp,
+        )
+        exchange.get_balance.return_value = {"USDT": 9000.0, "BTC": 0.1}
+        exchange.create_order.return_value = _make_order(
+            "SELL", 0.05, tp, "o-tp",
+        )
+        exited = await engine._check_position_exit("BTC/USDT")
+        assert exited is True
+        assert pos.partial_exits_done == 1
+
+
+# ---------------------------------------------------------------------------
+# Exchange error scenarios (Medium: error handling gaps)
+# ---------------------------------------------------------------------------
+
+
+class TestExchangeErrorScenario:
+    """Exchange rejects order — position state must remain consistent."""
+
+    async def test_buy_order_fails_no_position_created(self, db):
+        s = _scenario_settings()
+        exchange = AsyncMock()
+        ohlcv = _ohlcv_with_trend(60)
+        price = float(ohlcv["close"].iloc[-1])
+
+        exchange.get_ohlcv.return_value = ohlcv
+        exchange.get_balance.return_value = {"USDT": 10000.0, "BTC": 0.0}
+        exchange.get_ticker.return_value = Ticker(
+            symbol="BTC/USDT", bid=price, ask=price + 10, last=price,
+        )
+        exchange.create_order.side_effect = ExchangeError("Connection timeout")
+
+        engine = TradingEngine(
+            settings=s, exchange=exchange, database=db,
+            strategies=[_strategy_returning("BUY", 0.8)],
+        )
+        await engine._tick()
+
+        assert "BTC/USDT" not in engine._positions
+        trades = await db.get_trades()
+        assert len(trades) == 0
+
+    async def test_sell_order_fails_position_preserved(self, db):
+        """If SL sell fails, position should remain in engine._positions."""
+        s = _scenario_settings()
+        exchange = AsyncMock()
+        entry = 65000.0
+
+        pos = OpenPosition(
+            symbol="BTC/USDT", amount=0.1,
+            entry_price=entry, peak_price=entry,
+            atr_at_entry=200.0, atr_stop_loss=64600.0,
+            atr_take_profit=66500.0, atr_trailing_multiplier=1.5,
+        )
+        pos.set_risk(0.03, 0.02)
+
+        crash = pos.stop_loss_price - 50
+        exchange.get_ticker.return_value = Ticker(
+            symbol="BTC/USDT", bid=crash, ask=crash + 10, last=crash,
+        )
+        exchange.get_balance.return_value = {"USDT": 9000.0, "BTC": 0.1}
+        exchange.create_order.side_effect = ExchangeError("Order rejected")
+
+        engine = TradingEngine(
+            settings=s, exchange=exchange, database=db,
+            strategies=[],
+        )
+        engine._positions["BTC/USDT"] = pos
+
+        exited = await engine._check_position_exit("BTC/USDT")
+
+        assert exited is True
+        assert "BTC/USDT" in engine._positions, \
+            "Failed SELL must preserve position"
+
+    async def test_ohlcv_fetch_error_skips_symbol(self, db):
+        """Exchange error on OHLCV fetch should skip symbol, not crash."""
+        s = _scenario_settings()
+        exchange = AsyncMock()
+        exchange.get_ohlcv.side_effect = ExchangeError("API down")
+        exchange.get_balance.return_value = {"USDT": 10000.0}
+        exchange.get_ticker.return_value = Ticker(
+            symbol="BTC/USDT", bid=65000.0, ask=65010.0, last=65005.0,
+        )
+
+        engine = TradingEngine(
+            settings=s, exchange=exchange, database=db,
+            strategies=[_strategy_returning("BUY", 0.9)],
+        )
+
+        await engine._tick()
+        exchange.create_order.assert_not_called()
+
+    async def test_ticker_error_during_exit_check(self, db):
+        """If ticker fetch fails during exit check, position stays."""
+        s = _scenario_settings()
+        exchange = AsyncMock()
+        exchange.get_ticker.side_effect = ExchangeError("Timeout")
+
+        pos = OpenPosition(
+            symbol="BTC/USDT", amount=0.1,
+            entry_price=65000.0, peak_price=65500.0,
+        )
+        pos.set_risk(0.03, 0.02)
+
+        engine = TradingEngine(
+            settings=s, exchange=exchange, database=db,
+            strategies=[],
+        )
+        engine._positions["BTC/USDT"] = pos
+
+        exited = await engine._check_position_exit("BTC/USDT")
+        assert exited is False
+        assert "BTC/USDT" in engine._positions
+
+
+# ---------------------------------------------------------------------------
+# Multi-position simultaneous exit (Medium: portfolio-level risk)
+# ---------------------------------------------------------------------------
+
+
+class TestMultiPositionSimultaneousExit:
+    """Two positions hit exit conditions in the same tick."""
+
+    async def test_two_pairs_both_hit_sl(self, db):
+        base = load_settings()
+        s = Settings(
+            trading=TradingConfig(
+                mode="paper",
+                pairs=["BTC/USDT", "ETH/USDT"],
+                timeframe="1h",
+                poll_interval_seconds=1,
+            ),
+            paper_trading=base.paper_trading,
+            exchange=base.exchange,
+            strategies=base.strategies,
+            ai=base.ai,
+            risk=RiskConfig(
+                max_position_pct=0.10,
+                stop_loss_pct=0.03,
+                trailing_stop_pct=0.02,
+                max_drawdown_pct=0.50,
+                daily_loss_limit_pct=0.50,
+                max_single_order_usdt=5000.0,
+                max_data_age_seconds=86400,
+                max_concurrent_positions=5,
+                volume_min_multiplier=1.2,
+                ema_trend_enabled=False,
+            ),
+        )
+
+        exchange = AsyncMock()
+
+        btc_ohlcv = _ohlcv_with_trend(60, start_price=60000.0, step=100.0)
+        eth_ohlcv = _ohlcv_with_trend(60, start_price=3000.0, step=5.0)
+
+        async def get_ohlcv_side(symbol, *a, **kw):
+            return btc_ohlcv if symbol == "BTC/USDT" else eth_ohlcv
+
+        exchange.get_ohlcv.side_effect = get_ohlcv_side
+
+        btc_pos = OpenPosition(
+            symbol="BTC/USDT", amount=0.1,
+            entry_price=65000.0, peak_price=65000.0,
+            atr_at_entry=200.0, atr_stop_loss=64600.0,
+            atr_take_profit=66500.0, atr_trailing_multiplier=1.5,
+        )
+        btc_pos.set_risk(0.03, 0.02)
+
+        eth_pos = OpenPosition(
+            symbol="ETH/USDT", amount=2.0,
+            entry_price=3300.0, peak_price=3300.0,
+            atr_at_entry=20.0, atr_stop_loss=3260.0,
+            atr_take_profit=3360.0, atr_trailing_multiplier=1.5,
+        )
+        eth_pos.set_risk(0.03, 0.02)
+
+        btc_crash = 64500.0
+        eth_crash = 3250.0
+
+        async def get_ticker_side(symbol):
+            if symbol == "BTC/USDT":
+                return Ticker(
+                    symbol=symbol, bid=btc_crash, ask=btc_crash + 10,
+                    last=btc_crash,
+                )
+            return Ticker(
+                symbol=symbol, bid=eth_crash, ask=eth_crash + 5,
+                last=eth_crash,
+            )
+
+        exchange.get_ticker.side_effect = get_ticker_side
+
+        exchange.get_balance.return_value = {
+            "USDT": 7000.0, "BTC": 0.1, "ETH": 2.0,
+        }
+
+        sell_count = [0]
+
+        async def multi_sell(**kwargs):
+            sell_count[0] += 1
+            sym = kwargs["symbol"]
+            amt = kwargs["amount"]
+            p = btc_crash if "BTC" in sym else eth_crash
+            return Order(
+                id=f"o-sl-{sell_count[0]}",
+                symbol=sym,
+                side=OrderSide.SELL,
+                order_type=OrderType.MARKET,
+                amount=amt, price=p,
+                status=OrderStatus.FILLED,
+                filled_amount=amt, filled_price=p,
+            )
+
+        exchange.create_order.side_effect = multi_sell
+
+        engine = TradingEngine(
+            settings=s, exchange=exchange, database=db,
+            strategies=[],
+        )
+        engine._positions["BTC/USDT"] = btc_pos
+        engine._positions["ETH/USDT"] = eth_pos
+
+        await engine._tick()
+
+        assert "BTC/USDT" not in engine._positions
+        assert "ETH/USDT" not in engine._positions
+        assert sell_count[0] == 2
+
+
+# ---------------------------------------------------------------------------
+# Recovery after halt (Medium: circuit breaker / drawdown persistence)
+# ---------------------------------------------------------------------------
+
+
+class TestHaltPersistsAfterRecovery:
+    """Once halted by drawdown, engine stays halted even if portfolio recovers."""
+
+    async def test_halt_permanent_within_session(self, db):
+        s = _scenario_settings(max_drawdown_pct=0.10)
+        exchange = AsyncMock()
+        ohlcv = _ohlcv_with_trend(60)
+        price = float(ohlcv["close"].iloc[-1])
+
+        exchange.get_ohlcv.return_value = ohlcv
+        exchange.get_ticker.return_value = Ticker(
+            symbol="BTC/USDT", bid=price, ask=price + 10, last=price,
+        )
+
+        engine = TradingEngine(
+            settings=s, exchange=exchange, database=db,
+            strategies=[_strategy_returning("BUY", 0.9)],
+        )
+        engine._risk_manager.set_initial_portfolio_value(10000.0)
+
+        exchange.get_balance.return_value = {"USDT": 8000.0}
+        await engine._tick()
+        assert engine._halted is True
+
+        exchange.get_balance.return_value = {"USDT": 12000.0, "BTC": 0.0}
+        exchange.create_order.reset_mock()
+        await engine._tick()
+        await engine._tick()
+        await engine._tick()
+
+        exchange.create_order.assert_not_called()
+        assert engine._halted is True
+
+
+# ---------------------------------------------------------------------------
+# Bid-ask spread scenario (Medium: liquidity monitoring)
+# ---------------------------------------------------------------------------
+
+
+class TestBidAskSpreadScenario:
+    """Wide bid-ask spread — tests that engine uses .last, not bid/ask."""
+
+    async def test_wide_spread_position_uses_last(self, db):
+        s = _scenario_settings()
+        exchange = AsyncMock()
+        ohlcv = _ohlcv_with_trend(60, start_price=60000.0, step=100.0)
+        last = float(ohlcv["close"].iloc[-1])
+        bid = last - 200
+        ask = last + 200
+
+        exchange.get_ohlcv.return_value = ohlcv
+        exchange.get_balance.return_value = {"USDT": 10000.0, "BTC": 0.0}
+        exchange.get_ticker.return_value = Ticker(
+            symbol="BTC/USDT", bid=bid, ask=ask, last=last,
+        )
+        exchange.create_order.return_value = _make_order("BUY", 0.015, last)
+
+        engine = TradingEngine(
+            settings=s, exchange=exchange, database=db,
+            strategies=[_strategy_returning("BUY", 0.8)],
+        )
+        await engine._tick()
+
+        pos = engine._positions["BTC/USDT"]
+        assert pos.entry_price == last
+
+
+# ---------------------------------------------------------------------------
+# Strategy error resilience (Medium: error handling gaps)
+# ---------------------------------------------------------------------------
+
+
+class TestStrategyErrorResilience:
+    """If one strategy throws, other strategies should still produce signals."""
+
+    async def test_one_strategy_fails_others_still_work(self, db):
+        from backend.core.exceptions import StrategyError
+
+        s = _scenario_settings()
+        exchange = AsyncMock()
+        ohlcv = _ohlcv_with_trend(60)
+        price = float(ohlcv["close"].iloc[-1])
+
+        exchange.get_ohlcv.return_value = ohlcv
+        exchange.get_balance.return_value = {"USDT": 10000.0, "BTC": 0.0}
+        exchange.get_ticker.return_value = Ticker(
+            symbol="BTC/USDT", bid=price, ask=price + 10, last=price,
+        )
+        exchange.create_order.return_value = _make_order("BUY", 0.015, price)
+
+        broken = AsyncMock()
+        broken.name = "broken"
+        broken.analyze.side_effect = StrategyError("NaN in data")
+
+        working = AsyncMock()
+        working.name = "working"
+        working.analyze.return_value = Signal(
+            symbol="BTC/USDT", direction="BUY", confidence=0.8,
+            strategy_name="working", reason="Good signal",
+        )
+
+        engine = TradingEngine(
+            settings=s, exchange=exchange, database=db,
+            strategies=[broken, working],
+        )
+
+        await engine._tick()
+
+        exchange.create_order.assert_called_once()
+        assert "BTC/USDT" in engine._positions
+
+
+# ---------------------------------------------------------------------------
+# Rapid signal flip scenario (Medium: whipsaw prevention)
+# ---------------------------------------------------------------------------
+
+
+class TestRapidSignalFlip:
+    """Strategy flips BUY→SELL→BUY rapidly — cooldown should prevent chaos."""
+
+    async def test_buy_then_immediate_sell_then_buy(self, db):
+        s = _scenario_settings(ema_trend_enabled=False)
+        exchange = AsyncMock()
+        ohlcv = _ohlcv_with_trend(60)
+        price = float(ohlcv["close"].iloc[-1])
+
+        exchange.get_ohlcv.return_value = ohlcv
+        exchange.get_balance.return_value = {"USDT": 10000.0, "BTC": 0.0}
+        exchange.get_ticker.return_value = Ticker(
+            symbol="BTC/USDT", bid=price, ask=price + 10, last=price,
+        )
+        exchange.create_order.return_value = _make_order("BUY", 0.015, price)
+
+        tick_num = [0]
+        strat = AsyncMock()
+        strat.name = "flipper"
+
+        async def flip(symbol, data):
+            t = tick_num[0]
+            tick_num[0] += 1
+            if t == 0:
+                return Signal(
+                    symbol=symbol, direction="BUY", confidence=0.9,
+                    strategy_name="flipper", reason="Buy",
+                )
+            if t == 1:
+                return Signal(
+                    symbol=symbol, direction="SELL", confidence=0.9,
+                    strategy_name="flipper", reason="Sell",
+                )
+            return Signal(
+                symbol=symbol, direction="BUY", confidence=0.9,
+                strategy_name="flipper", reason="Rebuy",
+            )
+
+        strat.analyze.side_effect = flip
+
+        engine = TradingEngine(
+            settings=s, exchange=exchange, database=db,
+            strategies=[strat],
+        )
+
+        await engine._tick()
+        assert "BTC/USDT" in engine._positions
+
+        usdt_after = 10000.0 - 0.015 * price
+        exchange.get_balance.return_value = {
+            "USDT": usdt_after, "BTC": 0.015,
+        }
+        exchange.create_order.return_value = _make_order(
+            "SELL", 0.015, price, "o-sell",
+        )
+        await engine._tick()
+
+        exchange.get_balance.return_value = {"USDT": 10000.0, "BTC": 0.0}
+        exchange.create_order.reset_mock()
+        await engine._tick()
+
+        exchange.create_order.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Position with zero ATR (edge case: flat market)
+# ---------------------------------------------------------------------------
+
+
+class TestFlatMarketZeroATR:
+    """Perfectly flat OHLCV (high==low==close) → ATR is 0 → fallback stops."""
+
+    async def test_flat_ohlcv_fallback_stops(self, db):
+        s = _scenario_settings(ema_trend_enabled=False)
+        exchange = AsyncMock()
+        end = pd.Timestamp.now(tz="UTC")
+        start = end - pd.Timedelta(hours=59)
+        flat_price = 65000.0
+        ohlcv = pd.DataFrame({
+            "timestamp": pd.date_range(start, periods=60, freq="h"),
+            "open": [flat_price] * 60,
+            "high": [flat_price] * 60,
+            "low": [flat_price] * 60,
+            "close": [flat_price] * 60,
+            "volume": [100.0] * 59 + [200.0],
+        })
+
+        exchange.get_ohlcv.return_value = ohlcv
+        exchange.get_balance.return_value = {"USDT": 10000.0, "BTC": 0.0}
+        exchange.get_ticker.return_value = Ticker(
+            symbol="BTC/USDT", bid=flat_price, ask=flat_price + 10,
+            last=flat_price,
+        )
+        exchange.create_order.return_value = _make_order(
+            "BUY", 0.015, flat_price,
+        )
+
+        engine = TradingEngine(
+            settings=s, exchange=exchange, database=db,
+            strategies=[_strategy_returning("BUY", 0.8)],
+        )
+        await engine._tick()
+
+        pos = engine._positions["BTC/USDT"]
+        assert pos.atr_at_entry == 0.0, "ATR should be 0 in flat market"
+        expected_sl = flat_price * (1 - 0.03)
+        assert pos.stop_loss_price == pytest.approx(expected_sl)
+        assert pos.atr_take_profit == 0.0
