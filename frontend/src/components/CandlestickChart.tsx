@@ -48,7 +48,7 @@ const COLORS = {
   downCandle: '#ef4444',
   volumeUp: 'rgba(34, 197, 94, 0.15)',
   volumeDown: 'rgba(239, 68, 68, 0.15)',
-  equityLine: '#e5a243',
+  equityLine: '#a0a0a0',
 };
 
 export function CandlestickChart({ ohlcv, trades, equityCurve }: CandlestickChartProps) {
@@ -188,7 +188,7 @@ export function CandlestickChart({ ohlcv, trades, equityCurve }: CandlestickChar
           </span>
           {equityCurve && (
             <span className="flex items-center gap-1">
-              <span className="w-3 h-0.5 bg-[#e5a243] inline-block rounded" />
+              <span className="w-3 h-0.5 bg-[#a0a0a0] inline-block rounded" />
               Equity
             </span>
           )}

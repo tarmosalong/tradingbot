@@ -54,7 +54,7 @@ function App() {
   const signalTrigger = lastMessage?.type === 'signal' ? lastMessage : null;
 
   return (
-    <div className="min-h-screen flex flex-col bg-gradient-to-br from-[var(--bg-primary)] via-[var(--bg-primary)] to-[#12101a]">
+    <div className="min-h-screen flex flex-col bg-[var(--bg-primary)]">
       <Header mode={config?.mode ?? '...'} connected={connected} />
 
       <nav className="flex gap-1 px-6 pt-4 pb-2">
