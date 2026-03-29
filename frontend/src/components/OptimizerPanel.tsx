@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 
 interface TrialResult {
   number: number;
@@ -132,6 +132,7 @@ export function OptimizerPanel({ onApplyParams }: OptimizerPanelProps) {
   const [error, setError] = useState<string | null>(null);
   const [sortCol, setSortCol] = useState<'score' | 'return_pct' | 'max_drawdown_pct' | 'win_rate'>('score');
   const [sortAsc, setSortAsc] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
 
   const toggleStrategy = (id: string) => {
     setStrategies((prev) => {
@@ -155,6 +156,80 @@ export function OptimizerPanel({ onApplyParams }: OptimizerPanelProps) {
     if (col === sortCol) setSortAsc(!sortAsc);
     else { setSortCol(col); setSortAsc(false); }
   };
+
+  const buildExportJson = useCallback(() => {
+    if (!result) return null;
+    return {
+      config: {
+        symbol,
+        timeframe,
+        start,
+        end,
+        balance: parseFloat(balance),
+        strategies: Array.from(strategies),
+        n_trials: nTrials,
+        scoring,
+        tune_groups: Array.from(tuneGroups),
+        validate_best: validateBest,
+      },
+      best: {
+        score: result.best_score,
+        params: result.best_params,
+        metrics: result.best_metrics,
+      },
+      validation: result.validation?.aggregate_oos ?? null,
+      trials: result.trials.map((t) => ({
+        n: t.number,
+        score: t.score,
+        ...t.metrics,
+        params: t.params,
+      })),
+    };
+  }, [result, symbol, timeframe, start, end, balance, strategies, nTrials, scoring, tuneGroups, validateBest]);
+
+  const copyToClipboard = useCallback(async (mode: 'full' | 'summary') => {
+    if (!result) return;
+    let payload: unknown;
+    if (mode === 'summary') {
+      payload = {
+        config: {
+          symbol, timeframe, start, end,
+          balance: parseFloat(balance),
+          strategies: Array.from(strategies),
+          scoring,
+          tune_groups: Array.from(tuneGroups),
+        },
+        best: {
+          score: result.best_score,
+          params: result.best_params,
+          metrics: result.best_metrics,
+        },
+        validation: result.validation?.aggregate_oos ?? null,
+        top5_trials: result.trials.slice(0, 5).map((t) => ({
+          n: t.number, score: t.score, ...t.metrics,
+        })),
+        zero_trade_count: result.trials.filter((t) => t.metrics.total_trades === 0).length,
+        total_trials: result.trials.length,
+      };
+    } else {
+      payload = buildExportJson();
+    }
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+      setCopied(mode);
+      setTimeout(() => setCopied(null), 2000);
+    } catch {
+      const text = JSON.stringify(payload, null, 2);
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      setCopied(mode);
+      setTimeout(() => setCopied(null), 2000);
+    }
+  }, [result, buildExportJson, symbol, timeframe, start, end, balance, strategies, scoring, tuneGroups]);
 
   const runOptimize = async () => {
     setLoading(true);
@@ -331,14 +406,30 @@ export function OptimizerPanel({ onApplyParams }: OptimizerPanelProps) {
               <h2 className="text-sm font-medium text-[var(--accent)]">
                 Best Result (Trial #{result.trials[0]?.number})
               </h2>
-              {onApplyParams && (
+              <div className="flex items-center gap-2">
                 <button
-                  onClick={() => onApplyParams(result.best_params)}
-                  className="px-3 py-1.5 bg-[var(--accent)] text-white rounded text-xs font-medium hover:opacity-90 cursor-pointer"
+                  onClick={() => copyToClipboard('summary')}
+                  className="px-3 py-1.5 bg-[var(--bg-secondary)] border border-[var(--border)] text-[var(--text-secondary)] rounded text-xs font-medium hover:border-[var(--accent)] hover:text-[var(--accent)] cursor-pointer transition-colors"
+                  title="Copy summary (config + best result + top 5 trials) as JSON"
                 >
-                  Apply to Backtest
+                  {copied === 'summary' ? 'Copied!' : 'Copy Summary'}
                 </button>
-              )}
+                <button
+                  onClick={() => copyToClipboard('full')}
+                  className="px-3 py-1.5 bg-[var(--bg-secondary)] border border-[var(--border)] text-[var(--text-secondary)] rounded text-xs font-medium hover:border-[var(--accent)] hover:text-[var(--accent)] cursor-pointer transition-colors"
+                  title="Copy full results (config + all trials with params) as JSON"
+                >
+                  {copied === 'full' ? 'Copied!' : 'Copy Full JSON'}
+                </button>
+                {onApplyParams && (
+                  <button
+                    onClick={() => onApplyParams(result.best_params)}
+                    className="px-3 py-1.5 bg-[var(--accent)] text-white rounded text-xs font-medium hover:opacity-90 cursor-pointer"
+                  >
+                    Apply to Backtest
+                  </button>
+                )}
+              </div>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
               <MetricCard label="Score" value={result.best_score.toFixed(3)} />
