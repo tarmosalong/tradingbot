@@ -150,6 +150,7 @@ tradingbot/
 │   │   ├── data_loader.py      # Binance OHLCV download + CSV
 │   │   ├── report.py           # BacktestReport (Sharpe, drawdown etc)
 │   │   ├── walk_forward.py     # Walk-forward folds + aggregate OOS metrics
+│   │   ├── optimizer.py        # Optuna parameter optimizer
 │   │   └── runner.py           # CLI backtest runner
 │   ├── core/
 │   │   ├── engine.py           # TradingEngine (live loop)
@@ -599,6 +600,62 @@ Walk-forward splits the loaded OHLCV into sequential **train** / **test** window
 **API:** Enable with `walk_forward.enabled: true` on `POST /api/backtest`. Response may include `walk_forward` with `folds[]` (each with `train_report`, `test_report`) and `aggregate_oos` (`avg_return_pct`, `avg_sharpe`, `worst_return_pct`, etc.).
 
 **UI:** Backtest panel → Advanced Settings → Walk-Forward Validation.
+
+### Parameter Optimizer (Optuna)
+
+Automated parameter search using Bayesian optimization (Optuna TPE sampler). Runs N backtest trials with different parameter combinations and ranks results by scoring metric. Optionally validates the best result with walk-forward to detect overfitting.
+
+**Tunable parameter groups:**
+
+| Group | Parameters |
+|-------|-----------|
+| `strategy` | RSI period/oversold/overbought, MACD fast/slow/signal, Bollinger period/std_dev |
+| `risk` | stop_loss_pct, trailing_stop_pct, max_position_pct, min_confidence, risk_per_trade_pct |
+| `atr` | atr_stop_multiplier, atr_tp_multiplier, atr_trailing_multiplier, partial_tp_ratio |
+| `guards` | volume_min_multiplier, ema_trend_period, ema_trend_enabled |
+| `engine` | cooldown_candles, use_dynamic_sizing |
+
+**Scoring metrics:** `sharpe` (risk-adjusted return, default), `return` (total return %), `calmar` (return / max drawdown).
+
+**`POST /api/optimize`**
+
+```json
+{
+  "symbol": "BTC/USDT",
+  "timeframe": "1h",
+  "start": "2025-01-01",
+  "end": "2025-06-30",
+  "balance": 10000,
+  "strategies": ["rsi", "macd", "bollinger"],
+  "n_trials": 50,
+  "scoring": "sharpe",
+  "tune_groups": ["strategy", "risk", "atr"],
+  "validate_best": true,
+  "fee_rate": 0.001,
+  "slippage_rate": 0.0005
+}
+```
+
+Response:
+
+```json
+{
+  "trials": [
+    {
+      "number": 42,
+      "params": { "rsi_period": 10, "stop_loss_pct": 0.04, "atr_stop_multiplier": 2.5 },
+      "score": 1.234,
+      "metrics": { "sharpe": 1.234, "return_pct": 8.5, "max_drawdown_pct": 3.2, "win_rate": 55.0, "total_trades": 32 }
+    }
+  ],
+  "best_params": { "rsi_period": 10, "stop_loss_pct": 0.04 },
+  "best_metrics": { "sharpe": 1.234, "return_pct": 8.5 },
+  "best_score": 1.234,
+  "validation": { "folds": [], "aggregate_oos": { "avg_return_pct": 3.2, "avg_sharpe": 0.8 } }
+}
+```
+
+**UI:** Header → Optimizer tab. Configure symbol, dates, trials, scoring, parameter groups. Results show best parameters, all trials table (sortable), and walk-forward validation. "Apply to Backtest" button copies optimal parameters to the Backtest panel.
 
 ---
 
@@ -1110,7 +1167,8 @@ ruff check backend/ tests/
 | `tests/backtest/test_data_loader.py` | 3 | CSV round-trip, timezone handling |
 | `tests/backtest/test_report.py` | 12 | Drawdown, returns, Sharpe, report generation |
 | `tests/backtest/test_walk_forward.py` | 10 | Fold splitting, rolling/expanding, OOS aggregation |
-| **Total `tests/backtest/`** | **89** | (all backtest-related modules) |
+| `tests/backtest/test_optimizer.py` | 10 | Optuna integration, parameter building, scoring metrics, walk-forward validation |
+| **Total `tests/backtest/`** | **99** | (all backtest-related modules) |
 | `tests/notifications/test_telegram.py` | 11 | Telegram API payload, disabled path, session lifecycle |
 | `tests/ai/test_openai_client.py` | 5 | OpenAI JSON parsing, LLMProvider |
 | `tests/ai/test_veto_system.py` | 9 | Quorum, failures, timeouts |
@@ -1118,4 +1176,4 @@ ruff check backend/ tests/
 | `tests/core/test_engine.py` | 28+ | Signal aggregation, tick execution, ATR stops, volume filter, EMA trend, strategy weights, partial TP |
 | `tests/core/test_engine_scenarios.py` | 63 | End-to-end scenarios: slippage, whipsaw, flash crash, exchange errors, multi-position, halt persistence |
 | `tests/api/test_routes.py` | 13 | REST endpoints: health, config, trades, orders, portfolio, signals |
-| `tests/` (all) | **362** | Full suite — `pytest tests/ -v` |
+| `tests/` (all) | **373** | Full suite — `pytest tests/ -v` |

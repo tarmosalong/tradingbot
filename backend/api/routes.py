@@ -654,3 +654,65 @@ async def bot_patch_settings(body: PaperBotSettingsPatch):
             "initial_balance_usdt": settings.paper_trading.initial_balance_usdt,
         },
     }
+
+
+# ---- Parameter Optimizer ----
+
+
+class OptimizeRequest(BaseModel):
+    symbol: str = "BTC/USDT"
+    timeframe: str = "1h"
+    start: str = "2025-01-01"
+    end: str = "2025-06-30"
+    balance: float = 10000.0
+    strategies: list[str] = ["rsi", "macd", "bollinger"]
+    n_trials: int = 50
+    scoring: str = "sharpe"
+    tune_groups: list[str] = [
+        "strategy", "risk", "atr", "guards", "engine",
+    ]
+    validate_best: bool = True
+    fee_rate: float = 0.001
+    slippage_rate: float = 0.0005
+
+
+@router.post("/optimize")
+async def run_optimize(req: OptimizeRequest):
+    from backend.backtest.data_loader import load_from_binance
+    from backend.backtest.optimizer import run_optimization
+
+    if not req.start or not req.end:
+        return {"error": "Start and end dates are required"}
+
+    try:
+        start_dt = datetime.strptime(req.start, "%Y-%m-%d").replace(
+            tzinfo=UTC,
+        )
+        end_dt = datetime.strptime(req.end, "%Y-%m-%d").replace(
+            tzinfo=UTC,
+        )
+    except ValueError:
+        return {"error": "Invalid date format. Use YYYY-MM-DD"}
+
+    ohlcv = await load_from_binance(
+        req.symbol, req.timeframe, start_dt, end_dt,
+    )
+    if ohlcv.empty:
+        return {"error": "No data loaded for the given period"}
+
+    try:
+        result = await run_optimization(
+            ohlcv=ohlcv,
+            symbol=req.symbol,
+            balance=req.balance,
+            strategy_names=req.strategies,
+            tune_groups=req.tune_groups,
+            n_trials=req.n_trials,
+            scoring=req.scoring,
+            fee_rate=req.fee_rate,
+            slippage_rate=req.slippage_rate,
+            validate_best=req.validate_best,
+        )
+        return result.to_dict()
+    except ValueError as e:
+        return {"error": str(e)}

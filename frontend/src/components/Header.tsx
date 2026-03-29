@@ -3,7 +3,7 @@ interface HeaderProps {
   connected: boolean;
   portfolioValue: number | null;
   tab: string;
-  onTabChange: (tab: 'dashboard' | 'backtest') => void;
+  onTabChange: (tab: 'dashboard' | 'backtest' | 'optimizer') => void;
 }
 
 const MODE_LABEL: Record<string, string> = {
@@ -35,6 +35,9 @@ export function Header({ mode, connected, portfolioValue, tab, onTabChange }: He
               </NavTab>
               <NavTab active={tab === 'backtest'} onClick={() => onTabChange('backtest')}>
                 Backtest
+              </NavTab>
+              <NavTab active={tab === 'optimizer'} onClick={() => onTabChange('optimizer')}>
+                Optimizer
               </NavTab>
             </nav>
           </div>

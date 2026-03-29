@@ -8,9 +8,10 @@ import { PortfolioChart } from './components/PortfolioChart';
 import { PaperTradingPanel } from './components/PaperTradingPanel';
 import { SignalsPanel } from './components/SignalsPanel';
 import { BacktestPanel } from './components/BacktestPanel';
+import { OptimizerPanel } from './components/OptimizerPanel';
 import { PositionsPanel } from './components/PositionsPanel';
 
-type Tab = 'dashboard' | 'backtest';
+type Tab = 'dashboard' | 'backtest' | 'optimizer';
 
 function App() {
   const [tab, setTab] = useState<Tab>('dashboard');
@@ -21,6 +22,7 @@ function App() {
   const [exitRules, setExitRules] = useState<ExitRule[]>([]);
   const [positionsLoading, setPositionsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [optimizedParams, setOptimizedParams] = useState<Record<string, number | boolean> | null>(null);
 
   const wsUrl = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws`;
   const { lastMessage, connected } = useWebSocket(wsUrl);
@@ -107,7 +109,16 @@ function App() {
           </>
         )}
 
-        {tab === 'backtest' && <BacktestPanel />}
+        {tab === 'backtest' && <BacktestPanel optimizedParams={optimizedParams} onParamsApplied={() => setOptimizedParams(null)} />}
+
+        {tab === 'optimizer' && (
+          <OptimizerPanel
+            onApplyParams={(params) => {
+              setOptimizedParams(params);
+              setTab('backtest');
+            }}
+          />
+        )}
       </main>
 
       <footer className="px-6 py-4 border-t border-[var(--border-subtle)] text-center text-xs text-[var(--text-secondary)]">

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   AreaChart,
   Area,
@@ -237,7 +237,12 @@ const PROFILES: Record<string, BacktestProfile> = {
   },
 };
 
-export function BacktestPanel() {
+interface BacktestPanelProps {
+  optimizedParams?: Record<string, number | boolean> | null;
+  onParamsApplied?: () => void;
+}
+
+export function BacktestPanel({ optimizedParams, onParamsApplied }: BacktestPanelProps = {}) {
   const [symbol, setSymbol] = useState('BTC/USDT');
   const [timeframe, setTimeframe] = useState('1h');
   const [start, setStart] = useState('2025-01-01');
@@ -301,6 +306,35 @@ export function BacktestPanel() {
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    if (!optimizedParams) return;
+    const p = optimizedParams;
+    if (p.rsi_period != null) setRsiPeriod(p.rsi_period as number);
+    if (p.rsi_oversold != null) setRsiOversold(p.rsi_oversold as number);
+    if (p.rsi_overbought != null) setRsiOverbought(p.rsi_overbought as number);
+    if (p.macd_fast != null) setMacdFast(p.macd_fast as number);
+    if (p.macd_slow != null) setMacdSlow(p.macd_slow as number);
+    if (p.macd_signal != null) setMacdSignal(p.macd_signal as number);
+    if (p.boll_period != null) setBollPeriod(p.boll_period as number);
+    if (p.boll_std_dev != null) setBollStdDev(p.boll_std_dev as number);
+    if (p.max_position_pct != null) setRiskMaxPos(Math.round((p.max_position_pct as number) * 100));
+    if (p.stop_loss_pct != null) setRiskStopLoss(Math.round((p.stop_loss_pct as number) * 100));
+    if (p.trailing_stop_pct != null) setRiskTrailingStop(Math.round((p.trailing_stop_pct as number) * 100));
+    if (p.min_confidence != null) setRiskMinConfidence(Math.round((p.min_confidence as number) * 100));
+    if (p.risk_per_trade_pct != null) setRiskPerTrade((p.risk_per_trade_pct as number) * 100);
+    if (p.atr_stop_multiplier != null) setAtrStopMult(p.atr_stop_multiplier as number);
+    if (p.atr_tp_multiplier != null) setAtrTpMult(p.atr_tp_multiplier as number);
+    if (p.atr_trailing_multiplier != null) setAtrTrailingMult(p.atr_trailing_multiplier as number);
+    if (p.partial_tp_ratio != null) setPartialTpRatio(Math.round((p.partial_tp_ratio as number) * 100));
+    if (p.volume_min_multiplier != null) setVolumeMinMult(p.volume_min_multiplier as number);
+    if (p.ema_trend_period != null) setEmaTrendPeriod(p.ema_trend_period as number);
+    if (p.ema_trend_enabled != null) setEmaTrendEnabled(p.ema_trend_enabled as boolean);
+    if (p.cooldown_candles != null) setCooldownCandles(p.cooldown_candles as number);
+    if (p.use_dynamic_sizing != null) setDynamicSizing(p.use_dynamic_sizing as boolean);
+    setShowAdvanced(true);
+    onParamsApplied?.();
+  }, [optimizedParams, onParamsApplied]);
 
   const activeProfile = useMemo(() => {
     for (const [id, p] of Object.entries(PROFILES)) {
