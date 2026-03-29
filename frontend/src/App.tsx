@@ -5,7 +5,6 @@ import { useWebSocket } from './hooks/useWebSocket';
 import { Header } from './components/Header';
 import { StatsPanel } from './components/StatsPanel';
 import { PortfolioChart } from './components/PortfolioChart';
-import { ConfigPanel } from './components/ConfigPanel';
 import { PaperTradingPanel } from './components/PaperTradingPanel';
 import { SignalsPanel } from './components/SignalsPanel';
 import { BacktestPanel } from './components/BacktestPanel';
@@ -53,22 +52,21 @@ function App() {
 
   const signalTrigger = lastMessage?.type === 'signal' ? lastMessage : null;
 
+  const currentValue = portfolio.length > 0 ? portfolio[0].total_value_usdt : null;
+
   return (
     <div className="min-h-screen flex flex-col bg-[var(--bg-primary)]">
-      <Header mode={config?.mode ?? '...'} connected={connected} />
+      <Header
+        mode={config?.mode ?? '...'}
+        connected={connected}
+        portfolioValue={currentValue}
+        tab={tab}
+        onTabChange={setTab}
+      />
 
-      <nav className="flex gap-1 px-6 pt-4 pb-2">
-        <TabButton active={tab === 'dashboard'} onClick={() => setTab('dashboard')}>
-          Dashboard
-        </TabButton>
-        <TabButton active={tab === 'backtest'} onClick={() => setTab('backtest')}>
-          Backtest
-        </TabButton>
-      </nav>
-
-      <main className="flex-1 p-6 pt-2 max-w-7xl mx-auto w-full space-y-6">
+      <main className="flex-1 px-4 sm:px-6 lg:px-8 py-5 max-w-[1400px] mx-auto w-full space-y-5">
         {error && tab === 'dashboard' && (
-          <div className="bg-[var(--accent-red)]/10 border border-[var(--accent-red)]/30 rounded-xl px-4 py-3 text-sm text-[var(--accent-red)]">
+          <div className="bg-[var(--accent-red)]/8 border border-[var(--accent-red)]/20 rounded-lg px-4 py-3 text-sm text-[var(--accent-red)]">
             {error}
           </div>
         )}
@@ -76,52 +74,26 @@ function App() {
         {tab === 'dashboard' && (
           <>
             <StatsPanel portfolio={portfolio} trades={trades} />
+
             {config?.mode === 'paper' && (
               <PaperTradingPanel config={config} onConfigRefresh={fetchData} />
             )}
+
             <PositionsPanel trades={trades} refreshTrigger={signalTrigger} />
+
+            <PortfolioChart data={portfolio} />
+
             <SignalsPanel refreshTrigger={signalTrigger} />
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="lg:col-span-2">
-                <PortfolioChart data={portfolio} />
-              </div>
-              <div>
-                <ConfigPanel config={config} />
-              </div>
-            </div>
           </>
         )}
 
         {tab === 'backtest' && <BacktestPanel />}
       </main>
 
-      <footer className="px-6 py-3 border-t border-[var(--border)] text-center text-xs text-[var(--text-secondary)]">
-        Trading Bot Dashboard &middot; {config?.pairs?.join(' · ') ?? '...'} &middot; {config?.timeframe ?? '...'}
+      <footer className="px-6 py-4 border-t border-[var(--border-subtle)] text-center text-xs text-[var(--text-secondary)]">
+        {config?.pairs?.join(' \u00B7 ') ?? '...'} \u00B7 {config?.timeframe ?? '...'}
       </footer>
     </div>
-  );
-}
-
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`px-4 py-2 text-sm font-medium rounded-lg transition-all cursor-pointer ${
-        active
-          ? 'bg-[var(--bg-card)] text-[var(--accent)] shadow-sm shadow-[var(--accent)]/10 border border-[var(--border)]'
-          : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-secondary)]'
-      }`}
-    >
-      {children}
-    </button>
   );
 }
 

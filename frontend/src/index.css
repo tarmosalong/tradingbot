@@ -1,17 +1,19 @@
 @import "tailwindcss";
 
 :root {
-  --bg-primary: #0a0a0a;
-  --bg-secondary: #141414;
-  --bg-card: #1a1a1a;
-  --border: #2a2a2a;
-  --text-primary: #e8e8e8;
-  --text-secondary: #888888;
+  --bg-primary: #09090b;
+  --bg-secondary: #131316;
+  --bg-card: #18181b;
+  --border: #27272a;
+  --border-subtle: #1f1f23;
+  --text-primary: #fafafa;
+  --text-secondary: #71717a;
   --accent-green: #34d399;
   --accent-red: #f87171;
-  --accent: #a0a0a0;
-  --accent-warm: #b0b0b0;
-  --accent-yellow: #c8c8c8;
+  --accent: #a1a1aa;
+  --accent-warm: #d4d4d8;
+  --accent-yellow: #fbbf24;
+  --ring: rgba(161, 161, 170, 0.15);
 }
 
 body {
@@ -20,6 +22,7 @@ body {
   color: var(--text-primary);
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
+  letter-spacing: -0.011em;
 }
 
 *::-webkit-scrollbar {
@@ -33,7 +36,26 @@ body {
   background: var(--border);
   border-radius: 3px;
 }
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+}
 
 ::selection {
-  background: color-mix(in srgb, var(--accent) 30%, transparent);
+  background: color-mix(in srgb, var(--accent-green) 25%, transparent);
+}
+
+input[type="range"] {
+  height: 4px;
+}
+input[type="range"]::-webkit-slider-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  background: var(--bg-card);
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+input[type="range"]::-webkit-slider-thumb:hover {
+  border-color: var(--accent);
 }
