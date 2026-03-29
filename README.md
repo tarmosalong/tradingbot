@@ -9,11 +9,14 @@
 5. [Backend Modules](#backend-modules)
 6. [Strategies](#strategies)
 7. [Backtest System](#backtest-system)
-8. [AI Integration](#ai-integration)
-9. [Risk Management](#risk-management)
-10. [Frontend](#frontend)
-11. [API Reference](#api-reference)
-12. [Data Flow Diagrams](#data-flow-diagrams)
+8. [Walk-Forward Validation](#walk-forward-validation)
+9. [AI Integration](#ai-integration)
+10. [Multi-LLM Veto System](#multi-llm-veto-system)
+11. [Notifications (Telegram)](#notifications-telegram)
+12. [Risk Management](#risk-management)
+13. [Frontend](#frontend)
+14. [API Reference](#api-reference)
+15. [Data Flow Diagrams](#data-flow-diagrams)
 
 ---
 
@@ -28,9 +31,14 @@ Crypto trading bot supporting three modes:
 - Backend: Python 3.12+, FastAPI, asyncio
 - Frontend: React + TypeScript, Vite, TailwindCSS
 - Exchange: CCXT (Binance)
-- AI: Anthropic Claude Opus 4.6
+- AI: Anthropic Claude Opus 4.6; optional OpenAI (GPT-4o) for multi-LLM veto
 - Indicators: pandas-ta
 - Database: SQLite (aiosqlite)
+
+**Notable features:**
+- **Telegram alerts** — optional trade and error notifications via Bot API (`TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID`); wire `TelegramNotifier` into `TradingEngine` when starting the bot.
+- **Walk-forward validation** — optional sequential train/test folds on the same backtest request (`walk_forward` in `POST /api/backtest`); UI in Backtest Advanced Settings.
+- **Multi-LLM veto** — when `AIFilterStrategy` is constructed with a `VetoSystem`, Claude + OpenAI (and other `LLMProvider` implementations) must reach quorum before a BUY/SELL is approved. Configure via `AIConfig` (`veto_enabled`, `veto_min_agree`, `openai_model`) and `OPENAI_API_KEY`.
 
 ---
 
@@ -141,6 +149,7 @@ tradingbot/
 │   │   ├── ai_filter.py        # AI simulation filter
 │   │   ├── data_loader.py      # Binance OHLCV download + CSV
 │   │   ├── report.py           # BacktestReport (Sharpe, drawdown etc)
+│   │   ├── walk_forward.py     # Walk-forward folds + aggregate OOS metrics
 │   │   └── runner.py           # CLI backtest runner
 │   ├── core/
 │   │   ├── engine.py           # TradingEngine (live loop)
@@ -158,10 +167,15 @@ tradingbot/
 │   │   ├── ai_strategy.py      # Claude AI strategy
 │   │   └── sentiment.py        # News sentiment strategy
 │   ├── ai/
-│   │   ├── claude_client.py    # Anthropic API wrapper
+│   │   ├── base_provider.py    # LLMProvider ABC (veto)
+│   │   ├── claude_client.py    # Anthropic API wrapper + LLMProvider
+│   │   ├── openai_client.py    # OpenAI API wrapper (veto)
+│   │   ├── veto_system.py      # Multi-LLM parallel quorum
 │   │   ├── market_analyzer.py  # Market analysis with prompts
 │   │   ├── sentiment_analyzer.py # News sentiment
 │   │   └── prompts.py          # System + user prompts
+│   ├── notifications/
+│   │   └── telegram.py         # TelegramNotifier (Bot API via aiohttp)
 │   └── risk/
 │       └── manager.py          # Pre-trade risk checks
 ├── frontend/
@@ -205,6 +219,7 @@ graph TD
     SETTINGS --> RC["RiskConfig"]
     SETTINGS --> BC["BacktestConfig"]
     SETTINGS --> PC["PaperTradingConfig"]
+    SETTINGS --> TG["TelegramConfig"]
 ```
 
 ### All Configuration Values
@@ -261,6 +276,18 @@ graph TD
 | `sentiment_cache_ttl_seconds` | int | `900` | Sentiment cache TTL |
 | `max_tokens_analysis` | int | `4096` | Max tokens for analysis |
 | `max_tokens_sentiment` | int | `1024` | Max tokens for sentiment |
+| `openai_model` | str | `"gpt-4o"` | OpenAI model for veto provider |
+| `veto_enabled` | bool | `False` | Enable multi-LLM quorum on AI strategy (app wiring) |
+| `veto_min_agree` | int | `2` | Minimum providers that must agree on signal direction |
+
+#### TelegramConfig
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `False` | Send Telegram messages when token + chat id set |
+| `bot_token` | str | `""` | From `@BotFather` (or set `TELEGRAM_BOT_TOKEN` in `.env`) |
+| `chat_id` | str | `""` | Target chat (or `TELEGRAM_CHAT_ID` in `.env`) |
+
+If both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are present in `.env`, `load_settings()` enables Telegram automatically.
 
 #### RiskConfig
 | Field | Type | Default | Description |
@@ -543,6 +570,24 @@ graph TD
 
 ---
 
+## Walk-Forward Validation
+
+Walk-forward splits the loaded OHLCV into sequential **train** / **test** windows, runs a full backtest on each slice with the same strategy and engine parameters, and aggregates **out-of-sample (OOS)** metrics. This reduces overfitting compared to a single in-sample run.
+
+**Module:** [`backend/backtest/walk_forward.py`](backend/backtest/walk_forward.py)
+
+| Parameter | Description |
+|-----------|-------------|
+| `n_folds` | Number of folds (e.g. 3) |
+| `train_pct` | Fraction of each fold used for training (e.g. 0.7) |
+| `step_type` | `rolling` — chunk the series into folds; `expanding` — growing train window with sliding test |
+
+**API:** Enable with `walk_forward.enabled: true` on `POST /api/backtest`. Response may include `walk_forward` with `folds[]` (each with `train_report`, `test_report`) and `aggregate_oos` (`avg_return_pct`, `avg_sharpe`, `worst_return_pct`, etc.).
+
+**UI:** Backtest panel → Advanced Settings → Walk-Forward Validation.
+
+---
+
 ## AI Integration
 
 ### AI Layers
@@ -613,6 +658,37 @@ graph LR
 
 ---
 
+## Multi-LLM Veto System
+
+Optional second opinion for live **AI filter strategy** signals. Multiple `LLMProvider` implementations (e.g. `ClaudeClient`, `OpenAIClient`) are queried in parallel; a trade direction is **approved** only if at least `veto_min_agree` providers return the same `direction` (`BUY` / `SELL`) as the proposed signal.
+
+| File | Role |
+|------|------|
+| [`backend/ai/base_provider.py`](backend/ai/base_provider.py) | `LLMProvider` ABC — `analyze(system_prompt, user_prompt) -> dict` |
+| [`backend/ai/openai_client.py`](backend/ai/openai_client.py) | OpenAI Chat Completions, JSON response format |
+| [`backend/ai/veto_system.py`](backend/ai/veto_system.py) | `VetoSystem` — `asyncio.gather`, quorum, timeout |
+| [`backend/ai/claude_client.py`](backend/ai/claude_client.py) | Implements `LLMProvider` via uncached `analyze()` |
+
+[`AIFilterStrategy`](backend/strategies/ai_strategy.py) accepts optional `veto_system: VetoSystem | None`. When set and Claude proposes BUY/SELL, `evaluate()` runs before returning the signal; on veto, the strategy returns HOLD.
+
+**Secrets:** `OPENAI_API_KEY` in `.env` (see `.env.example`).
+
+---
+
+## Notifications (Telegram)
+
+[`TelegramNotifier`](backend/notifications/telegram.py) sends Markdown messages through the Telegram Bot HTTP API (uses `aiohttp`, no extra dependency).
+
+| Method | Use |
+|--------|-----|
+| `send_trade(trade, signal)` | After a filled order |
+| `send_alert(message, level)` | Errors / circuit breaker |
+| `send_daily_summary(stats)` | Optional daily digest |
+
+**Wiring:** Pass `TelegramNotifier(load_settings().telegram)` into `TradingEngine(..., notifier=...)` and call `await notifier.start()` / `close()` around the trading loop lifecycle. The API server lifespan does not start the engine by default; integrate where you launch `TradingEngine`.
+
+---
+
 ## Risk Management
 
 ### Risk Controls in Backtest
@@ -670,6 +746,7 @@ graph TD
     ADV --> RISK["Risk Mgmt<br/>Stop-loss, Trailing, Max order"]
     ADV --> STRAT_P["Strategy Params<br/>RSI/MACD/Bollinger sliders"]
     ADV --> AI_P["AI Filter Params<br/>Crash lookback, thresholds"]
+    ADV --> WF["Walk-Forward<br/>Folds, train %, step type"]
 
     RESULTS --> CARDS["Stat Cards<br/>Return, Sharpe, Win rate..."]
     RESULTS --> CANDLE["CandlestickChart<br/>+ Trade markers"]
@@ -677,6 +754,7 @@ graph TD
     RESULTS --> AISTATS["AI Filter Stats"]
     RESULTS --> ENGSTATS["Engine Stats<br/>Fees, stops, skips"]
     RESULTS --> SIGSPLIT["Strategy Signals<br/>BUY/SELL/HOLD bars"]
+    RESULTS --> WFRES["Walk-Forward Table<br/>OOS aggregate"]
     RESULTS --> TRADES["Trade History<br/>Table"]
 ```
 
@@ -741,9 +819,17 @@ All REST endpoints are prefixed with `/api`.
     "adx_trending_threshold": 25.0,
     "take_profit_pct": 0.0,
     "take_profit_ratio": 0.5
+  },
+  "walk_forward": {
+    "enabled": false,
+    "n_folds": 3,
+    "train_pct": 0.7,
+    "step_type": "rolling"
   }
 }
 ```
+
+When `walk_forward.enabled` is `true`, the response includes a `walk_forward` object with `folds` and `aggregate_oos` in addition to the full-period backtest above.
 
 ### POST `/api/backtest` Response
 
@@ -781,9 +867,29 @@ All REST endpoints are prefixed with `/api`.
   "equity_curve": [10000.0, 10002.5, "..."],
   "timestamps": ["2025-01-01T00:00:00+00:00", "..."],
   "ohlcv": [{ "time": 1735689600, "open": 42000, "high": 42500, "low": 41800, "close": 42200, "volume": 150.5 }],
-  "trades": [{ "symbol": "BTC/USDT", "side": "BUY", "amount": 0.0023, "price": 42150.0, "executed_at": "2025-01-15T14:00:00+00:00", "portfolio_value": 10050.0 }]
+  "trades": [{ "symbol": "BTC/USDT", "side": "BUY", "amount": 0.0023, "price": 42150.0, "executed_at": "2025-01-15T14:00:00+00:00", "portfolio_value": 10050.0 }],
+  "walk_forward": {
+    "folds": [
+      {
+        "fold_index": 1,
+        "train_start": "...",
+        "train_end": "...",
+        "test_start": "...",
+        "test_end": "...",
+        "train_report": { "total_return_pct": 0, "sharpe_ratio": 0 },
+        "test_report": { "total_return_pct": 0, "sharpe_ratio": 0 }
+      }
+    ],
+    "aggregate_oos": {
+      "avg_return_pct": 0,
+      "avg_sharpe": 0,
+      "n_folds": 3
+    }
+  }
 }
 ```
+
+Omitted when `walk_forward.enabled` is `false`.
 
 ---
 
@@ -873,6 +979,9 @@ sequenceDiagram
 BINANCE_API_KEY=your_binance_api_key
 BINANCE_API_SECRET=your_binance_api_secret
 ANTHROPIC_API_KEY=your_anthropic_api_key
+OPENAI_API_KEY=             # Multi-LLM veto (OpenAI provider)
+TELEGRAM_BOT_TOKEN=         # Optional trade / alert notifications
+TELEGRAM_CHAT_ID=
 TRADING_MODE=paper          # paper | live | backtest
 LOG_LEVEL=INFO              # DEBUG | INFO | WARNING
 ```
@@ -910,8 +1019,12 @@ ruff check backend/ tests/
 | `tests/backtest/test_ai_filter.py` | 11 | Crash detection, recovery, strength, stats |
 | `tests/backtest/test_engine.py` | 4 | Base engine execution, trending data, equity curve |
 | `tests/backtest/test_engine_advanced.py` | 10 | Fees, slippage, stop-loss, trailing, cooldown, drawdown, dynamic sizing |
-| `tests/backtest/test_exchange.py` | 11 | Exchange balances, orders, insufficient funds |
+| `tests/backtest/test_exchange.py` | 12 | Exchange balances, orders, insufficient funds |
 | `tests/backtest/test_data_loader.py` | 3 | CSV round-trip, timezone handling |
-| `tests/backtest/test_report.py` | 7 | Drawdown, returns, Sharpe, report generation |
-| **Total backtest** | **46** | |
-| `tests/` (all) | **52+** | + core engine, strategies, AI, API, database |
+| `tests/backtest/test_report.py` | 12 | Drawdown, returns, Sharpe, report generation |
+| `tests/backtest/test_walk_forward.py` | 10 | Fold splitting, rolling/expanding, OOS aggregation |
+| **Total `tests/backtest/`** | **62** | (all backtest-related modules) |
+| `tests/notifications/test_telegram.py` | 11 | Telegram API payload, disabled path, session lifecycle |
+| `tests/ai/test_openai_client.py` | 5 | OpenAI JSON parsing, LLMProvider |
+| `tests/ai/test_veto_system.py` | 9 | Quorum, failures, timeouts |
+| `tests/` (all) | **207** | Full suite — `pytest tests/ -v` |
