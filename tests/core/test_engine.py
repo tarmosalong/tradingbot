@@ -591,3 +591,49 @@ class TestPositionExitMonitoring:
         assert result[0]["current_price"] == 65005.0
         assert "exit_conditions" in result[0]
         assert len(result[0]["exit_conditions"]) == 3
+
+    async def test_no_duplicate_buy_when_position_exists(
+        self, risk_settings, mock_exchange, db,
+    ):
+        """BUY signal should be skipped when already holding."""
+        engine = TradingEngine(
+            settings=risk_settings,
+            exchange=mock_exchange,
+            database=db,
+            strategies=[_buy_strategy()],
+        )
+
+        pos = OpenPosition(
+            symbol="BTC/USDT",
+            amount=0.1,
+            entry_price=65000.0,
+            peak_price=65500.0,
+        )
+        pos.set_risk(0.03, 0.02)
+        engine._positions["BTC/USDT"] = pos
+
+        mock_exchange.create_order.reset_mock()
+        await engine._tick()
+
+        mock_exchange.create_order.assert_not_called()
+        assert engine._positions["BTC/USDT"].amount == 0.1
+
+    async def test_cooldown_prevents_rapid_buys(
+        self, risk_settings, mock_exchange, db,
+    ):
+        """Second BUY within cooldown window should be skipped."""
+        from datetime import UTC, datetime
+
+        engine = TradingEngine(
+            settings=risk_settings,
+            exchange=mock_exchange,
+            database=db,
+            strategies=[_buy_strategy()],
+        )
+
+        engine._last_trade_time["BTC/USDT"] = datetime.now(UTC)
+
+        mock_exchange.create_order.reset_mock()
+        await engine._tick()
+
+        mock_exchange.create_order.assert_not_called()

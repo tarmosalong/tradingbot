@@ -99,6 +99,7 @@ class TradingEngine:
         self._notifier = notifier
         self._running = False
         self._positions: dict[str, OpenPosition] = {}
+        self._last_trade_time: dict[str, datetime] = {}
 
     @property
     def is_running(self) -> bool:
@@ -356,6 +357,30 @@ class TradingEngine:
 
     async def _execute_signal(self, signal: Signal) -> None:
         """Execute a trading signal via the exchange."""
+        if signal.direction == "BUY":
+            existing = self._positions.get(signal.symbol)
+            if existing:
+                logger.info(
+                    "Skipping BUY — already holding position",
+                    symbol=signal.symbol,
+                    amount=existing.amount,
+                    entry=existing.entry_price,
+                )
+                return
+
+            last_buy_ts = self._last_trade_time.get(signal.symbol)
+            cooldown = self._settings.trading.poll_interval_seconds * 3
+            if last_buy_ts is not None:
+                elapsed = (datetime.now(UTC) - last_buy_ts).total_seconds()
+                if elapsed < cooldown:
+                    logger.info(
+                        "Skipping BUY — cooldown active",
+                        symbol=signal.symbol,
+                        elapsed_s=int(elapsed),
+                        cooldown_s=cooldown,
+                    )
+                    return
+
         balance = await self._exchange.get_balance()
         ticker = await self._exchange.get_ticker(signal.symbol)
         base, quote = signal.symbol.split("/")
@@ -365,7 +390,9 @@ class TradingEngine:
 
         if signal.direction == "BUY":
             available = balance.get(quote, 0.0)
-            budget = min(available * position_pct, max_order)
+            total_portfolio = sum(balance.values())
+            max_for_symbol = total_portfolio * position_pct
+            budget = min(available * position_pct, max_order, max_for_symbol)
             if budget < 1.0:
                 logger.warning(
                     "Insufficient budget for BUY",
@@ -442,6 +469,7 @@ class TradingEngine:
             await self._db.insert_trade(trade)
             await self._db.insert_order(order)
             await self._notify_trade(trade, signal)
+            self._last_trade_time[signal.symbol] = datetime.now(UTC)
 
         except ExchangeError:
             logger.exception(
