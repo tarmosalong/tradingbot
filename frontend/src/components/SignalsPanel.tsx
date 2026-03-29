@@ -2,9 +2,6 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   AreaChart,
   Area,
-  BarChart,
-  Bar,
-  Cell,
   XAxis,
   YAxis,
   Tooltip,
@@ -246,37 +243,48 @@ function ConfidenceTimeline({ history }: { history: SignalEntry[] }) {
   );
 }
 
-function StrategyBarChart({ strategies }: { strategies: SignalEntry[] }) {
+function verdictText(dir: string, confidence: number): string {
+  if (dir === 'HOLD' || confidence < 0.05) return 'No signal detected';
+  const pct = Math.round(confidence * 100);
+  const strength = pct >= 70 ? 'Strong' : pct >= 40 ? 'Moderate' : 'Weak';
+  return `${strength} ${dir === 'BUY' ? 'buy' : 'sell'} signal (${pct}%)`;
+}
+
+function StrategyVerdicts({ strategies }: { strategies: SignalEntry[] }) {
   if (strategies.length === 0) return null;
-  const data = strategies.map((s) => ({
-    name: strategyLabel(s.strategy_name),
-    confidence: s.confidence,
-    direction: s.direction,
-  }));
   return (
     <div>
       <h3 className="text-[11px] font-medium text-[var(--text-secondary)] mb-2">
         Strategy opinions
-        <InfoTooltip text="Each strategy independently analyses the market. Longer bars mean higher conviction. Green = bullish, red = bearish, grey = no opinion." />
+        <InfoTooltip text="Each strategy independently analyses the market and gives its verdict. A filled bar means a stronger signal." />
       </h3>
-      <ResponsiveContainer width="100%" height={Math.max(80, strategies.length * 38 + 16)}>
-        <BarChart data={data} layout="vertical" margin={{ top: 0, right: 8, bottom: 0, left: 4 }}>
-          <XAxis type="number" domain={[0, 1]} ticks={[0, 0.25, 0.5, 0.75, 1.0]} tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(v: number) => `${Math.round(v * 100)}%`} />
-          <YAxis type="category" dataKey="name" tick={{ fill: 'var(--text-secondary)', fontSize: 11 }} axisLine={false} tickLine={false} width={85} />
-          <Tooltip
-            contentStyle={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)', fontSize: 12 }}
-            formatter={(_v: unknown, _n: unknown, props: unknown) => {
-              const p = props as { payload?: { direction?: string } };
-              return [`${Math.round(Number(_v) * 100)}% — ${directionLabel(p.payload?.direction ?? '')}`, 'Conviction'];
-            }}
-          />
-          <Bar dataKey="confidence" radius={[0, 4, 4, 0]} barSize={22}>
-            {data.map((entry, idx) => (
-              <Cell key={idx} fill={DIR_COLOR[entry.direction] ?? 'var(--text-secondary)'} fillOpacity={0.8} />
-            ))}
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
+      <div className="space-y-2.5">
+        {strategies.map((s) => {
+          const pct = Math.round(s.confidence * 100);
+          const noSignal = s.direction === 'HOLD' || pct < 1;
+          const color = DIR_COLOR[s.direction] ?? 'var(--text-secondary)';
+          return (
+            <div key={s.id}>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-medium">{strategyLabel(s.strategy_name)}</span>
+                <span className={`text-[11px] ${noSignal ? 'text-[var(--text-secondary)]' : ''}`} style={noSignal ? undefined : { color }}>
+                  {verdictText(s.direction, s.confidence)}
+                </span>
+              </div>
+              <div className="h-2 rounded-full bg-[var(--bg-primary)] overflow-hidden">
+                {noSignal ? (
+                  <div className="h-full rounded-full bg-[var(--border)]" style={{ width: '100%', opacity: 0.3 }} />
+                ) : (
+                  <div
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{ width: `${Math.max(pct, 3)}%`, backgroundColor: color }}
+                  />
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -284,7 +292,7 @@ function StrategyBarChart({ strategies }: { strategies: SignalEntry[] }) {
 /* ── Strategy detail cards ── */
 
 function StrategyCard({ s }: { s: SignalEntry }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
   const info = STRATEGY_INFO[s.strategy_name];
   const indicators = Object.entries(s.indicators);
 
@@ -339,6 +347,16 @@ export function SignalsPanel({ refreshTrigger }: SignalsPanelProps) {
   useEffect(() => { void fetchSignals(); }, [refreshTrigger, fetchSignals]);
 
   const cycles = groupByCycle(signals);
+
+  useEffect(() => {
+    if (cycles.length === 0) return;
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      for (const c of cycles) next.add(c.symbol);
+      if (next.size === prev.size) return prev;
+      return next;
+    });
+  }, [cycles]);
 
   if (loading && cycles.length === 0) {
     return (
@@ -432,7 +450,7 @@ export function SignalsPanel({ refreshTrigger }: SignalsPanelProps) {
                       <ConfidenceTimeline history={history} />
                     </div>
                     <div className="rounded-lg border border-[var(--border)] p-3 bg-[var(--bg-primary)]/30">
-                      <StrategyBarChart strategies={strategies} />
+                      <StrategyVerdicts strategies={strategies} />
                     </div>
                   </div>
 
