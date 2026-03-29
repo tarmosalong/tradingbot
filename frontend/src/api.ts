@@ -118,6 +118,35 @@ export interface PaperBotSettingsBody {
   strategies?: string[];
 }
 
+export interface OpenPosition {
+  symbol: string;
+  amount: number;
+  entry_price: number;
+  current_price: number;
+  peak_price: number;
+  pnl: number;
+  pnl_pct: number;
+  stop_loss_price: number;
+  trailing_stop_price: number;
+  opened_at: string;
+  exit_conditions: string[];
+}
+
+export interface ExitRule {
+  name: string;
+  description: string;
+  active: boolean;
+}
+
+export interface PositionsResponse {
+  positions: OpenPosition[];
+  risk_config: {
+    stop_loss_pct: number;
+    trailing_stop_pct: number;
+  };
+  exit_rules: ExitRule[];
+}
+
 export const api = {
   health: () => fetchJson<{ status: string }>('/health'),
   config: () => fetchJson<BotConfig>('/config'),
@@ -133,6 +162,7 @@ export const api = {
     fetchJsonRequest<{ ok: boolean } & BotStatus>('/bot/start', { method: 'POST' }),
   botStop: () =>
     fetchJsonRequest<{ ok: boolean } & BotStatus>('/bot/stop', { method: 'POST' }),
+  botPositions: () => fetchJson<PositionsResponse>('/bot/positions'),
   botPatchSettings: (body: PaperBotSettingsBody) =>
     fetchJsonRequest<{
       ok: boolean;

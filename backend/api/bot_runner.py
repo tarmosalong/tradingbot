@@ -143,6 +143,11 @@ class BotRunner:
         async with self._lock:
             self._state = "stopped"
 
+    async def get_positions(self) -> list[dict]:
+        if self._engine is not None:
+            return await self._engine.get_positions_with_prices()
+        return []
+
     async def shutdown(self) -> None:
         await self.stop()
 

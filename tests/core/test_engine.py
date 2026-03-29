@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock
 import pandas as pd
 import pytest
 
-from backend.config import Settings, TradingConfig, load_settings
-from backend.core.engine import TradingEngine
+from backend.config import RiskConfig, Settings, TradingConfig, load_settings
+from backend.core.engine import OpenPosition, TradingEngine
 from backend.database import Database
 from backend.models import (
     Order,
@@ -348,3 +348,246 @@ class TestTradingEngine:
         agg = [s for s in signals if s["strategy_name"] == "aggregator"]
         assert len(agg) == 1
         assert agg[0]["direction"] == "HOLD"
+
+
+class TestOpenPosition:
+    def test_to_dict_with_profit(self):
+        pos = OpenPosition(
+            symbol="BTC/USDT",
+            amount=0.1,
+            entry_price=60000.0,
+            peak_price=66000.0,
+        )
+        pos.set_risk(0.03, 0.02)
+
+        result = pos.to_dict(current_price=65000.0)
+
+        assert result["pnl"] == 500.0
+        assert result["stop_loss_price"] == 60000.0 * 0.97
+        assert result["trailing_stop_price"] == 66000.0 * 0.98
+        assert len(result["exit_conditions"]) == 3
+
+    def test_to_dict_with_loss(self):
+        pos = OpenPosition(
+            symbol="ETH/USDT",
+            amount=1.0,
+            entry_price=2000.0,
+            peak_price=2000.0,
+        )
+        pos.set_risk(0.03, 0.02)
+
+        result = pos.to_dict(current_price=1950.0)
+
+        assert result["pnl"] == -50.0
+        assert result["pnl_pct"] == pytest.approx(-2.5)
+
+
+class TestPositionExitMonitoring:
+    @pytest.fixture
+    def risk_settings(self, settings):
+        base = load_settings()
+        return Settings(
+            trading=TradingConfig(
+                mode="paper",
+                pairs=["BTC/USDT"],
+                timeframe="1h",
+                poll_interval_seconds=1,
+            ),
+            paper_trading=base.paper_trading,
+            exchange=base.exchange,
+            strategies=base.strategies,
+            ai=base.ai,
+            risk=RiskConfig(
+                max_position_pct=0.10,
+                stop_loss_pct=0.03,
+                trailing_stop_pct=0.02,
+                max_drawdown_pct=0.15,
+                daily_loss_limit_pct=0.05,
+                max_single_order_usdt=1000.0,
+            ),
+        )
+
+    async def test_stop_loss_triggers_sell(
+        self, risk_settings, mock_exchange, db,
+    ):
+        engine = TradingEngine(
+            settings=risk_settings,
+            exchange=mock_exchange,
+            database=db,
+            strategies=[_hold_strategy()],
+        )
+
+        pos = OpenPosition(
+            symbol="BTC/USDT",
+            amount=0.1,
+            entry_price=65000.0,
+            peak_price=65000.0,
+        )
+        pos.set_risk(0.03, 0.02)
+        engine._positions["BTC/USDT"] = pos
+
+        # Price drops below stop-loss (3% below 65000 = 63050)
+        mock_exchange.get_ticker.return_value = Ticker(
+            symbol="BTC/USDT", bid=62000.0, ask=62010.0, last=62000.0,
+        )
+        mock_exchange.get_balance.return_value = {"USDT": 5000.0, "BTC": 0.1}
+        mock_exchange.create_order.return_value = Order(
+            id="o-sl",
+            symbol="BTC/USDT",
+            side=OrderSide.SELL,
+            order_type=OrderType.MARKET,
+            amount=0.1,
+            price=62000.0,
+            status=OrderStatus.FILLED,
+            filled_amount=0.1,
+            filled_price=62000.0,
+        )
+
+        exited = await engine._check_position_exit("BTC/USDT")
+
+        assert exited is True
+        assert "BTC/USDT" not in engine._positions
+        mock_exchange.create_order.assert_called_once()
+
+    async def test_trailing_stop_triggers_sell(
+        self, risk_settings, mock_exchange, db,
+    ):
+        engine = TradingEngine(
+            settings=risk_settings,
+            exchange=mock_exchange,
+            database=db,
+            strategies=[_hold_strategy()],
+        )
+
+        pos = OpenPosition(
+            symbol="BTC/USDT",
+            amount=0.1,
+            entry_price=60000.0,
+            peak_price=70000.0,
+        )
+        pos.set_risk(0.03, 0.02)
+        engine._positions["BTC/USDT"] = pos
+
+        # Trailing stop = 70000 * 0.98 = 68600
+        # SL = 60000 * 0.97 = 58200
+        # Price at 68000 < 68600 but > 58200 → trailing stop
+        mock_exchange.get_ticker.return_value = Ticker(
+            symbol="BTC/USDT", bid=68000.0, ask=68010.0, last=68000.0,
+        )
+        mock_exchange.get_balance.return_value = {"USDT": 5000.0, "BTC": 0.1}
+        mock_exchange.create_order.return_value = Order(
+            id="o-ts",
+            symbol="BTC/USDT",
+            side=OrderSide.SELL,
+            order_type=OrderType.MARKET,
+            amount=0.1,
+            price=68000.0,
+            status=OrderStatus.FILLED,
+            filled_amount=0.1,
+            filled_price=68000.0,
+        )
+
+        exited = await engine._check_position_exit("BTC/USDT")
+
+        assert exited is True
+        assert "BTC/USDT" not in engine._positions
+
+    async def test_no_exit_when_price_safe(
+        self, risk_settings, mock_exchange, db,
+    ):
+        engine = TradingEngine(
+            settings=risk_settings,
+            exchange=mock_exchange,
+            database=db,
+            strategies=[_hold_strategy()],
+        )
+
+        pos = OpenPosition(
+            symbol="BTC/USDT",
+            amount=0.1,
+            entry_price=65000.0,
+            peak_price=66000.0,
+        )
+        pos.set_risk(0.03, 0.02)
+        engine._positions["BTC/USDT"] = pos
+
+        mock_exchange.get_ticker.return_value = Ticker(
+            symbol="BTC/USDT", bid=65500.0, ask=65510.0, last=65500.0,
+        )
+
+        exited = await engine._check_position_exit("BTC/USDT")
+
+        assert exited is False
+        assert "BTC/USDT" in engine._positions
+        mock_exchange.create_order.assert_not_called()
+
+    async def test_peak_price_updates(
+        self, risk_settings, mock_exchange, db,
+    ):
+        engine = TradingEngine(
+            settings=risk_settings,
+            exchange=mock_exchange,
+            database=db,
+            strategies=[_hold_strategy()],
+        )
+
+        pos = OpenPosition(
+            symbol="BTC/USDT",
+            amount=0.1,
+            entry_price=65000.0,
+            peak_price=66000.0,
+        )
+        pos.set_risk(0.03, 0.02)
+        engine._positions["BTC/USDT"] = pos
+
+        mock_exchange.get_ticker.return_value = Ticker(
+            symbol="BTC/USDT", bid=68000.0, ask=68010.0, last=68000.0,
+        )
+
+        await engine._check_position_exit("BTC/USDT")
+
+        assert pos.peak_price == 68000.0
+
+    async def test_buy_creates_position(
+        self, risk_settings, mock_exchange, db,
+    ):
+        engine = TradingEngine(
+            settings=risk_settings,
+            exchange=mock_exchange,
+            database=db,
+            strategies=[_buy_strategy()],
+        )
+
+        await engine._tick()
+
+        assert "BTC/USDT" in engine._positions
+        pos = engine._positions["BTC/USDT"]
+        assert pos.amount == 0.015
+        assert pos.entry_price == 65005.0
+
+    async def test_get_positions_with_prices(
+        self, risk_settings, mock_exchange, db,
+    ):
+        engine = TradingEngine(
+            settings=risk_settings,
+            exchange=mock_exchange,
+            database=db,
+            strategies=[],
+        )
+
+        pos = OpenPosition(
+            symbol="BTC/USDT",
+            amount=0.1,
+            entry_price=65000.0,
+            peak_price=66000.0,
+        )
+        pos.set_risk(0.03, 0.02)
+        engine._positions["BTC/USDT"] = pos
+
+        result = await engine.get_positions_with_prices()
+
+        assert len(result) == 1
+        assert result[0]["symbol"] == "BTC/USDT"
+        assert result[0]["current_price"] == 65005.0
+        assert "exit_conditions" in result[0]
+        assert len(result[0]["exit_conditions"]) == 3

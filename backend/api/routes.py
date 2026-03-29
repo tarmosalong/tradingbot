@@ -367,6 +367,48 @@ async def bot_stop():
     return {"ok": True, **bot_runner.status_dict()}
 
 
+@router.get("/bot/positions")
+async def bot_positions():
+    positions = await bot_runner.get_positions()
+    settings = load_settings()
+    sl_pct = settings.risk.stop_loss_pct
+    ts_pct = settings.risk.trailing_stop_pct
+    return {
+        "positions": positions,
+        "risk_config": {
+            "stop_loss_pct": sl_pct,
+            "trailing_stop_pct": ts_pct,
+        },
+        "exit_rules": [
+            {
+                "name": "Stop-loss",
+                "description": (
+                    "Automaatne müük kui hind langeb"
+                    f" {sl_pct*100:.1f}% alla ostuhinna"
+                ),
+                "active": sl_pct > 0,
+            },
+            {
+                "name": "Trailing stop",
+                "description": (
+                    "Automaatne müük kui hind langeb"
+                    f" {ts_pct*100:.1f}% alla kõrgeima hinna"
+                ),
+                "active": ts_pct > 0,
+            },
+            {
+                "name": "Strateegia signaal",
+                "description": (
+                    "Müük kui RSI ≥ 70 (üleostetud),"
+                    " MACD langev ristmik või hind"
+                    " üle Bollingeri ülemise piiri"
+                ),
+                "active": True,
+            },
+        ],
+    }
+
+
 @router.patch("/bot/settings")
 async def bot_patch_settings(body: PaperBotSettingsPatch):
     if bot_runner.state != "stopped":
