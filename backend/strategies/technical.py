@@ -66,12 +66,24 @@ class RSIStrategy(StrategyBase):
                 timestamp=datetime.now(UTC),
             )
 
+        mid = (self._cfg.oversold + self._cfg.overbought) / 2
+        dist_buy = rsi_val - self._cfg.oversold
+        dist_sell = self._cfg.overbought - rsi_val
+        nearest_dist = min(dist_buy, dist_sell)
+        half_range = mid - self._cfg.oversold
+        warmth = max(0.0, (half_range - nearest_dist) / half_range) * 0.45
+
+        if dist_buy < dist_sell:
+            reason = f"RSI {rsi_val:.1f} in neutral zone, {dist_buy:.0f} pts from buy"
+        else:
+            reason = f"RSI {rsi_val:.1f} in neutral zone, {dist_sell:.0f} pts from sell"
+
         return Signal(
             symbol=symbol,
             direction="HOLD",
-            confidence=0.0,
+            confidence=round(warmth, 3),
             strategy_name=self.name,
-            reason=f"RSI {rsi_val:.1f} in neutral zone",
+            reason=reason,
             indicators=indicators,
             timestamp=datetime.now(UTC),
         )
@@ -129,7 +141,6 @@ class MACDStrategy(StrategyBase):
             "macd_histogram": hist_val,
         }
 
-        # Bullish crossover: histogram flips from negative to positive
         if prev_hist < 0 and hist_val > 0:
             confidence = min(0.5 + abs(hist_val) * 10, 1.0)
             return Signal(
@@ -142,7 +153,6 @@ class MACDStrategy(StrategyBase):
                 timestamp=datetime.now(UTC),
             )
 
-        # Bearish crossover: histogram flips from positive to negative
         if prev_hist > 0 and hist_val < 0:
             confidence = min(0.5 + abs(hist_val) * 10, 1.0)
             return Signal(
@@ -155,12 +165,21 @@ class MACDStrategy(StrategyBase):
                 timestamp=datetime.now(UTC),
             )
 
+        abs_hist = abs(hist_val)
+        closing = abs_hist < abs(prev_hist)
+        scale = max(abs(prev_hist), 1e-9)
+        warmth = max(0.0, (1.0 - abs_hist / scale)) * 0.4 if closing else 0.0
+        warmth = min(warmth, 0.45)
+
+        side = "buy" if hist_val < 0 else "sell"
+        trend = "converging" if closing else "diverging"
+
         return Signal(
             symbol=symbol,
             direction="HOLD",
-            confidence=0.0,
+            confidence=round(warmth, 3),
             strategy_name=self.name,
-            reason=f"MACD no crossover, histogram {hist_val:.4f}",
+            reason=f"MACD {trend} toward {side}, histogram {hist_val:.4f}",
             indicators=indicators,
             timestamp=datetime.now(UTC),
         )
@@ -246,12 +265,23 @@ class BollingerStrategy(StrategyBase):
                 timestamp=datetime.now(UTC),
             )
 
+        half_width = band_width / 2 if band_width > 0 else 1
+        dist_lower = close - lower
+        dist_upper = upper - close
+        nearest_dist = min(dist_lower, dist_upper)
+        warmth = max(0.0, (half_width - nearest_dist) / half_width) * 0.45
+
+        if dist_lower < dist_upper:
+            reason = f"Price {close:.2f} within bands, ${dist_lower:.0f} from lower"
+        else:
+            reason = f"Price {close:.2f} within bands, ${dist_upper:.0f} from upper"
+
         return Signal(
             symbol=symbol,
             direction="HOLD",
-            confidence=0.0,
+            confidence=round(warmth, 3),
             strategy_name=self.name,
-            reason=f"Price {close:.2f} within bands [{lower:.2f}, {upper:.2f}]",
+            reason=reason,
             indicators=indicators,
             timestamp=datetime.now(UTC),
         )

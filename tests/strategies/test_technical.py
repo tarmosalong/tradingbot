@@ -85,6 +85,17 @@ class TestRSIStrategy:
 
         assert signal.direction == "HOLD"
 
+    async def test_hold_has_graduated_confidence(self):
+        closes = [65000 + (i % 5) * 10 for i in range(60)]
+        ohlcv = _make_ohlcv(closes, n=len(closes))
+        strategy = RSIStrategy()
+
+        signal = await strategy.analyze("BTC/USDT", ohlcv)
+
+        assert signal.direction == "HOLD"
+        assert 0 <= signal.confidence <= 0.45
+        assert "pts from" in signal.reason
+
     async def test_insufficient_data_returns_hold(self):
         ohlcv = _make_ohlcv([65000.0] * 5, n=5)
         strategy = RSIStrategy()
@@ -125,6 +136,7 @@ class TestMACDStrategy:
         signal = await strategy.analyze("BTC/USDT", ohlcv)
 
         assert signal.direction == "HOLD"
+        assert 0 <= signal.confidence <= 0.45
 
     async def test_insufficient_data_returns_hold(self):
         ohlcv = _make_ohlcv([65000.0] * 10, n=10)
@@ -165,6 +177,7 @@ class TestBollingerStrategy:
         signal = await strategy.analyze("BTC/USDT", ohlcv)
 
         assert signal.direction == "HOLD"
+        assert 0 <= signal.confidence <= 0.45
 
     async def test_insufficient_data_returns_hold(self):
         ohlcv = _make_ohlcv([65000.0] * 10, n=10)
