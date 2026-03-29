@@ -60,6 +60,9 @@ class AIConfig:
     sentiment_cache_ttl_seconds: int = 900
     max_tokens_analysis: int = 4096
     max_tokens_sentiment: int = 1024
+    openai_model: str = "gpt-4o"
+    veto_enabled: bool = False
+    veto_min_agree: int = 2
 
 
 @dataclass(frozen=True)
@@ -109,6 +112,7 @@ class Settings:
     binance_api_key: str = ""
     binance_api_secret: str = ""
     anthropic_api_key: str = ""
+    openai_api_key: str = ""
     log_level: str = "INFO"
 
 
@@ -193,5 +197,6 @@ def load_settings(config_path: str | Path | None = None) -> Settings:
         binance_api_key=os.getenv("BINANCE_API_KEY", ""),
         binance_api_secret=os.getenv("BINANCE_API_SECRET", ""),
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
+        openai_api_key=os.getenv("OPENAI_API_KEY", ""),
         log_level=os.getenv("LOG_LEVEL", raw.get("logging", {}).get("level", "INFO")),
     )

@@ -4,6 +4,7 @@ websockets>=14.0
 
 # AI
 anthropic>=0.52
+openai>=1.60
 
 # Data & Indicators
 pandas>=2.2

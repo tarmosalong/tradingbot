@@ -7,6 +7,7 @@ from typing import Any
 
 import anthropic
 
+from backend.ai.base_provider import LLMProvider
 from backend.config import AIConfig
 from backend.core.exceptions import AIError
 from backend.core.logger import get_logger
@@ -14,7 +15,7 @@ from backend.core.logger import get_logger
 logger = get_logger("claude")
 
 
-class ClaudeClient:
+class ClaudeClient(LLMProvider):
     """Async wrapper for the Anthropic Claude API with rate limiting and caching."""
 
     def __init__(self, api_key: str, config: AIConfig | None = None) -> None:
@@ -24,6 +25,25 @@ class ClaudeClient:
         self._cache: dict[str, tuple[float, Any]] = {}
         self._call_count = 0
         self._total_tokens = 0
+
+    @property
+    def name(self) -> str:
+        return "claude"
+
+    async def analyze(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int = 4096,
+    ) -> dict:
+        """LLMProvider interface — uncached call to Claude."""
+        return await self._call(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            max_tokens=max_tokens,
+            cache_key=None,
+            cache_ttl=0,
+        )
 
     async def analyze_market(
         self,
