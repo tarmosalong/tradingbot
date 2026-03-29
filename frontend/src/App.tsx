@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { api } from './api';
-import type { Trade, PortfolioSnapshot, BotConfig } from './api';
+import type { Trade, PortfolioSnapshot, BotConfig, OpenPosition, ExitRule } from './api';
 import { useWebSocket } from './hooks/useWebSocket';
 import { Header } from './components/Header';
 import { StatsPanel } from './components/StatsPanel';
@@ -17,6 +17,9 @@ function App() {
   const [trades, setTrades] = useState<Trade[]>([]);
   const [portfolio, setPortfolio] = useState<PortfolioSnapshot[]>([]);
   const [config, setConfig] = useState<BotConfig | null>(null);
+  const [positions, setPositions] = useState<OpenPosition[]>([]);
+  const [exitRules, setExitRules] = useState<ExitRule[]>([]);
+  const [positionsLoading, setPositionsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const wsUrl = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws`;
@@ -24,14 +27,18 @@ function App() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [t, p, c] = await Promise.all([
+      const [t, p, c, posData] = await Promise.all([
         api.trades(),
         api.portfolio(),
         api.config(),
+        api.botPositions().catch(() => ({ positions: [], risk_config: { stop_loss_pct: 0, trailing_stop_pct: 0 }, exit_rules: [] })),
       ]);
       setTrades(t);
       setPortfolio(p);
       setConfig(c);
+      setPositions(posData.positions);
+      setExitRules(posData.exit_rules);
+      setPositionsLoading(false);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to fetch data');
@@ -52,6 +59,7 @@ function App() {
 
   const signalTrigger = lastMessage?.type === 'signal' ? lastMessage : null;
 
+  const initialBalance = config?.paper_trading?.initial_balance_usdt ?? 10_000;
   const currentValue = portfolio.length > 0 ? portfolio[0].total_value_usdt : null;
 
   return (
@@ -73,15 +81,25 @@ function App() {
 
         {tab === 'dashboard' && (
           <>
-            <StatsPanel portfolio={portfolio} trades={trades} />
+            <StatsPanel
+              portfolio={portfolio}
+              trades={trades}
+              positions={positions}
+              initialBalance={initialBalance}
+            />
 
             {config?.mode === 'paper' && (
               <PaperTradingPanel config={config} onConfigRefresh={fetchData} />
             )}
 
-            <PositionsPanel trades={trades} refreshTrigger={signalTrigger} />
-
             <PortfolioChart data={portfolio} />
+
+            <PositionsPanel
+              trades={trades}
+              positions={positions}
+              exitRules={exitRules}
+              loading={positionsLoading}
+            />
 
             <SignalsPanel refreshTrigger={signalTrigger} />
           </>
