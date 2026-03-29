@@ -8,15 +8,13 @@ interface StatsPanelProps {
 }
 
 export function StatsPanel({ portfolio, trades, positions, initialBalance }: StatsPanelProps) {
-  const latestSnapshot = portfolio.length > 0 ? portfolio[0] : null;
-  const cashBalance = latestSnapshot?.balances?.USDT ?? initialBalance;
-  const positionsValue = positions.reduce(
-    (sum, p) => sum + p.current_price * p.amount,
+  const unrealizedPnl = positions.reduce((sum, p) => sum + p.pnl, 0);
+  const realizedPnl = trades.reduce(
+    (sum, t) => sum + (t.pnl ?? 0),
     0,
   );
-  const currentValue = cashBalance + positionsValue;
-
-  const pnl = currentValue - initialBalance;
+  const pnl = unrealizedPnl + realizedPnl;
+  const currentValue = initialBalance + pnl;
   const pnlPct = initialBalance > 0 ? (pnl / initialBalance) * 100 : 0;
 
   const totalTrades = trades.length;
