@@ -880,3 +880,91 @@ class TestDailyReset:
                 if t.trade.executed_at:
                     trade_days.add(t.trade.executed_at.date())
             assert len(trade_days) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Stop-loss fill price regression test
+# ---------------------------------------------------------------------------
+
+class TestStopLossFillPrice:
+    """Stop-loss and TP exits must fill at the target price, not candle close.
+
+    Before the fix, _force_sell sent MARKET orders without a price hint,
+    causing fills at the candle close which could be far from the stop.
+    """
+
+    @pytest.mark.asyncio
+    async def test_stop_loss_fills_at_stop_price_not_close(self):
+        """Build a scenario where low triggers ATR stop but close is much lower.
+
+        Before the fix, _force_sell sent MARKET orders without a price,
+        causing fills at the candle close (much worse than the stop price).
+        """
+        rows = []
+        for i in range(40):
+            ts = datetime(2025, 1, 1, tzinfo=UTC) + pd.Timedelta(hours=i)
+            price = 100.0 + i * 0.3
+            rows.append({
+                "timestamp": ts,
+                "open": price,
+                "high": price + 1.5,
+                "low": price - 1.5,
+                "close": price,
+                "volume": 200.0,
+            })
+
+        entry_approx = 100.0 + 39 * 0.3
+        crash_ts = datetime(2025, 1, 1, tzinfo=UTC) + pd.Timedelta(hours=40)
+        rows.append({
+            "timestamp": crash_ts,
+            "open": entry_approx,
+            "high": entry_approx + 0.5,
+            "low": entry_approx - 25.0,
+            "close": entry_approx - 20.0,
+            "volume": 500.0,
+        })
+
+        for i in range(20):
+            ts = datetime(2025, 1, 1, tzinfo=UTC) + pd.Timedelta(hours=41 + i)
+            price = entry_approx - 20.0 + i * 0.1
+            rows.append({
+                "timestamp": ts,
+                "open": price,
+                "high": price + 1.0,
+                "low": price - 1.0,
+                "close": price,
+                "volume": 200.0,
+            })
+
+        ohlcv = pd.DataFrame(rows)
+        ex = BacktestExchange(
+            ohlcv, initial_balance_usdt=10000.0,
+            fee_rate=0.0, slippage_rate=0.0,
+        )
+        risk = _risk(
+            stop_loss_pct=0.05,
+            atr_stop_multiplier=2.0,
+            atr_tp_multiplier=50.0,
+            atr_trailing_multiplier=50.0,
+        )
+        engine = BacktestEngine(
+            exchange=ex,
+            strategies=[_FixedStrategy("BUY", confidence=0.9)],
+            symbol="BTC/USDT",
+            risk_config=risk,
+        )
+        result = await engine.run()
+
+        sl_trades = [
+            t for t in result.trades
+            if t.signal.strategy_name == "stop_loss"
+        ]
+        assert len(sl_trades) > 0, "Expected at least one stop-loss exit"
+
+        crash_close = entry_approx - 20.0
+        for t in sl_trades:
+            assert t.trade.price > crash_close + 1.0, (
+                f"Stop-loss fill {t.trade.price:.2f} should be above "
+                f"candle close {crash_close:.2f}; stop should fill "
+                f"at the stop price, not the close"
+            )

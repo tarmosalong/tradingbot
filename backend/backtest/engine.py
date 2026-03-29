@@ -487,6 +487,7 @@ class BacktestEngine:
                 side="SELL",
                 order_type="MARKET",
                 amount=amount,
+                price=target_price,
             )
             return Trade(
                 id=str(uuid.uuid4()),
@@ -636,7 +637,9 @@ class BacktestEngine:
         atr = RiskManager.calculate_atr(ohlcv)
         if atr <= 0 or price <= 0:
             return None
-        risk_amount = portfolio_val * self._risk.risk_per_trade_pct
         atr_stop_dist = atr * self._risk.atr_stop_multiplier
+        if atr_stop_dist <= 0:
+            return None
+        risk_amount = portfolio_val * self._risk.risk_per_trade_pct
         shares = risk_amount / atr_stop_dist
         return shares * price

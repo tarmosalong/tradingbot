@@ -92,7 +92,7 @@ class BacktestExchange(ExchangeBase):
         price: float | None = None,
     ) -> Order:
         row = self._current_row()
-        mid_price = price if price and order_type.upper() == "LIMIT" else float(row["close"])
+        mid_price = price if price is not None else float(row["close"])
 
         if side.upper() == "BUY":
             fill_price = mid_price * (1.0 + self._slippage_rate)
