@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from typing import TYPE_CHECKING
 
 from backend.config import Settings
 from backend.core.exceptions import ExchangeError, StrategyError
@@ -10,6 +11,9 @@ from backend.database import Database
 from backend.exchange.base import ExchangeBase
 from backend.models import OrderSide, Signal, Trade
 from backend.strategies.base import StrategyBase
+
+if TYPE_CHECKING:
+    from backend.notifications.telegram import TelegramNotifier
 
 logger = get_logger("engine")
 
@@ -23,11 +27,13 @@ class TradingEngine:
         exchange: ExchangeBase,
         database: Database,
         strategies: list[StrategyBase],
+        notifier: TelegramNotifier | None = None,
     ) -> None:
         self._settings = settings
         self._exchange = exchange
         self._db = database
         self._strategies = strategies
+        self._notifier = notifier
         self._running = False
         self._positions: dict[str, float] = {}
 
@@ -53,6 +59,10 @@ class TradingEngine:
                 break
             except Exception:
                 logger.exception("Unexpected error in trading loop")
+                await self._notify_alert(
+                    "Unexpected error in trading loop — check logs",
+                    "ERROR",
+                )
 
             await asyncio.sleep(
                 self._settings.trading.poll_interval_seconds
@@ -236,6 +246,7 @@ class TradingEngine:
             )
             await self._db.insert_trade(trade)
             await self._db.insert_order(order)
+            await self._notify_trade(trade, signal)
 
         except ExchangeError:
             logger.exception(
@@ -263,3 +274,17 @@ class TradingEngine:
             await self._db.save_portfolio_snapshot(total, balance)
         except ExchangeError:
             logger.exception("Failed to snapshot portfolio")
+
+    async def _notify_trade(self, trade: Trade, signal: Signal) -> None:
+        if self._notifier:
+            try:
+                await self._notifier.send_trade(trade, signal)
+            except Exception:
+                logger.debug("Telegram trade notification failed")
+
+    async def _notify_alert(self, message: str, level: str) -> None:
+        if self._notifier:
+            try:
+                await self._notifier.send_alert(message, level)
+            except Exception:
+                logger.debug("Telegram alert notification failed")

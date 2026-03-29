@@ -73,6 +73,13 @@ class RiskConfig:
 
 
 @dataclass(frozen=True)
+class TelegramConfig:
+    enabled: bool = False
+    bot_token: str = ""
+    chat_id: str = ""
+
+
+@dataclass(frozen=True)
 class BacktestConfig:
     default_start: str = "2025-01-01"
     default_end: str = "2025-12-31"
@@ -97,6 +104,7 @@ class Settings:
     ai: AIConfig = field(default_factory=AIConfig)
     risk: RiskConfig = field(default_factory=RiskConfig)
     backtest: BacktestConfig = field(default_factory=BacktestConfig)
+    telegram: TelegramConfig = field(default_factory=TelegramConfig)
 
     binance_api_key: str = ""
     binance_api_secret: str = ""
@@ -153,6 +161,7 @@ def load_settings(config_path: str | Path | None = None) -> Settings:
     ai = _build_nested(AIConfig, raw.get("ai", {}))
     risk = _build_nested(RiskConfig, raw.get("risk", {}))
     backtest = _build_nested(BacktestConfig, raw.get("backtest", {}))
+    telegram = _build_nested(TelegramConfig, raw.get("telegram", {}))
 
     mode_override = os.getenv("TRADING_MODE")
     if mode_override:
@@ -163,6 +172,15 @@ def load_settings(config_path: str | Path | None = None) -> Settings:
             poll_interval_seconds=trading.poll_interval_seconds,
         )
 
+    tg_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    tg_chat = os.getenv("TELEGRAM_CHAT_ID", "")
+    if tg_token and tg_chat:
+        telegram = TelegramConfig(
+            enabled=True,
+            bot_token=tg_token,
+            chat_id=tg_chat,
+        )
+
     return Settings(
         trading=trading,
         paper_trading=paper_trading,
@@ -171,6 +189,7 @@ def load_settings(config_path: str | Path | None = None) -> Settings:
         ai=ai,
         risk=risk,
         backtest=backtest,
+        telegram=telegram,
         binance_api_key=os.getenv("BINANCE_API_KEY", ""),
         binance_api_secret=os.getenv("BINANCE_API_SECRET", ""),
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
