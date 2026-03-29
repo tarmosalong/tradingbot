@@ -1,0 +1,34 @@
+---
+description: Keep README and env templates in sync when behavior, API, or config changes
+alwaysApply: true
+---
+
+# Documentation Maintenance
+
+Whenever you change **user-visible behavior**, **public APIs**, **configuration**, **environment variables**, or **architecture**, update project documentation in the same change set (same PR / same commit batch as the feature).
+
+## Primary docs
+
+- **[README.md](README.md)** — single source of truth for the repo: overview, setup, config tables, API request/response examples, project structure, new modules, and test coverage summary when counts shift materially.
+- **[.env.example](.env.example)** — every new or renamed secret / env var must appear here with a short comment (no real values). Keep in sync with `load_settings()` and Pydantic models.
+
+## What to update in README
+
+| Change type | Update |
+|-------------|--------|
+| New endpoint or request/response shape | API Reference + example JSON |
+| New `Settings` / YAML / dataclass fields | Configuration tables and hierarchy diagram if needed |
+| New package or important file | Project structure tree |
+| New user-facing feature (Telegram, backtest option, etc.) | Overview or dedicated section |
+| New optional integration | Environment variables block |
+
+## What not to do
+
+- Do not add large new markdown files the user did not ask for unless the change truly needs a separate doc (prefer extending README).
+- Do not log or document secrets; placeholders only in `.env.example`.
+
+## Workflow
+
+1. Implement the code and tests.
+2. Update README (and `.env.example` if applicable) before committing.
+3. Follow **095-commit-after-changes** — include doc updates in the same logical commit when they belong together.
