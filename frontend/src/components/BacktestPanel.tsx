@@ -25,10 +25,14 @@ interface EngineStats {
   stop_loss_exits: number;
   trailing_stop_exits: number;
   take_profit_exits: number;
+  partial_tp_exits: number;
   drawdown_halt_candle: number | null;
+  daily_loss_skips: number;
   signals_below_confidence: number;
   cooldown_skips: number;
   regime_filtered: number;
+  volume_filtered: number;
+  ema_filtered: number;
   total_fees: number;
   total_slippage: number;
 }
@@ -143,10 +147,20 @@ export function BacktestPanel() {
   const [riskStopLoss, setRiskStopLoss] = useState(3);
   const [riskTrailingStop, setRiskTrailingStop] = useState(2);
   const [riskMaxOrder, setRiskMaxOrder] = useState(1000);
+  const [riskMaxDrawdown, setRiskMaxDrawdown] = useState(15);
+  const [riskDailyLoss, setRiskDailyLoss] = useState(5);
+  const [riskMinConfidence, setRiskMinConfidence] = useState(40);
+  const [atrStopMult, setAtrStopMult] = useState(2.0);
+  const [atrTpMult, setAtrTpMult] = useState(3.0);
+  const [atrTrailingMult, setAtrTrailingMult] = useState(1.5);
+  const [volumeMinMult, setVolumeMinMult] = useState(1.2);
+  const [emaTrendPeriod, setEmaTrendPeriod] = useState(50);
+  const [emaTrendEnabled, setEmaTrendEnabled] = useState(true);
+  const [riskPerTrade, setRiskPerTrade] = useState(1.0);
+  const [partialTpRatio, setPartialTpRatio] = useState(50);
 
   const [feeRate, setFeeRate] = useState(0.1);
   const [slippageRate, setSlippageRate] = useState(0.05);
-  const [minConfidence, setMinConfidence] = useState(0);
   const [cooldownCandles, setCooldownCandles] = useState(0);
   const [dynamicSizing, setDynamicSizing] = useState(false);
   const [regimeFilter, setRegimeFilter] = useState(false);
@@ -221,6 +235,17 @@ export function BacktestPanel() {
             stop_loss_pct: riskStopLoss / 100,
             trailing_stop_pct: riskTrailingStop / 100,
             max_single_order_usdt: riskMaxOrder,
+            max_drawdown_pct: riskMaxDrawdown / 100,
+            daily_loss_limit_pct: riskDailyLoss / 100,
+            min_confidence: riskMinConfidence / 100,
+            atr_stop_multiplier: atrStopMult,
+            atr_tp_multiplier: atrTpMult,
+            atr_trailing_multiplier: atrTrailingMult,
+            volume_min_multiplier: volumeMinMult,
+            ema_trend_period: emaTrendPeriod,
+            ema_trend_enabled: emaTrendEnabled,
+            risk_per_trade_pct: riskPerTrade / 100,
+            partial_tp_ratio: partialTpRatio / 100,
           },
           ai_filter: {
             enabled: aiEnabled,
@@ -234,7 +259,7 @@ export function BacktestPanel() {
           engine: {
             fee_rate: feeRate / 100,
             slippage_rate: slippageRate / 100,
-            min_confidence: minConfidence / 100,
+            min_confidence: 0,
             cooldown_candles: cooldownCandles,
             use_dynamic_sizing: dynamicSizing,
             enable_regime_filter: regimeFilter,
@@ -464,10 +489,9 @@ export function BacktestPanel() {
 
             <div>
               <h3 className="text-xs font-medium text-[var(--accent-yellow,#eab308)] mb-2">Trading Costs (Realism)</h3>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 <ParamInput label="Fee Rate %" value={feeRate} onChange={setFeeRate} min={0} max={0.5} step={0.01} tooltip="Exchange fee per trade as percentage. Binance default: 0.1% (maker/taker). Set to 0 for zero-fee simulation. Default: 0.1%" />
                 <ParamInput label="Slippage %" value={slippageRate} onChange={setSlippageRate} min={0} max={0.5} step={0.01} tooltip="Estimated price slippage per trade. BUY price is increased, SELL price decreased by this amount. Real markets: 0.01–0.3%. Default: 0.05%" />
-                <ParamInput label="Min Confidence %" value={minConfidence} onChange={setMinConfidence} min={0} max={90} tooltip="Minimum aggregated signal confidence required to execute a trade. Filters out weak signals. 0 = no filter, 60 = only strong signals. Default: 0" />
                 <ParamInput label="Cooldown (candles)" value={cooldownCandles} onChange={setCooldownCandles} min={0} max={50} tooltip="Minimum number of candles between trades. Prevents rapid-fire trading that racks up fees. 0 = no cooldown. Default: 0" />
               </div>
             </div>
@@ -518,11 +542,41 @@ export function BacktestPanel() {
 
             <div>
               <h3 className="text-xs font-medium text-[var(--accent-red)] mb-2">Risk Management</h3>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 <ParamInput label="Max Position %" value={riskMaxPos} onChange={setRiskMaxPos} min={1} max={100} tooltip="Maximum percentage of available balance that can be used for a single position. Lower = more conservative. Default: 10%" />
-                <ParamInput label="Stop Loss %" value={riskStopLoss} onChange={setRiskStopLoss} min={0.5} max={20} step={0.5} tooltip="Fixed stop-loss percentage below purchase price. Position is closed if price drops this much. Default: 3%" />
-                <ParamInput label="Trailing Stop %" value={riskTrailingStop} onChange={setRiskTrailingStop} min={0.5} max={20} step={0.5} tooltip="Dynamic stop that follows price upward. Locks in profits while allowing upside. Triggers if price drops this % from its peak. Default: 2%" />
-                <ParamInput label="Max Order (USDT)" value={riskMaxOrder} onChange={setRiskMaxOrder} min={10} max={100000} step={10} tooltip="Maximum value (in USDT) for a single order. Prevents any one trade from being too large. Default: $1,000" />
+                <ParamInput label="Stop Loss %" value={riskStopLoss} onChange={setRiskStopLoss} min={0} max={20} step={0.5} tooltip="Fixed stop-loss percentage below purchase price (fallback when ATR unavailable). Default: 3%" />
+                <ParamInput label="Trailing Stop %" value={riskTrailingStop} onChange={setRiskTrailingStop} min={0} max={20} step={0.5} tooltip="Percentage trailing stop from peak price (fallback when ATR unavailable). Default: 2%" />
+                <ParamInput label="Max Drawdown %" value={riskMaxDrawdown} onChange={setRiskMaxDrawdown} min={1} max={50} tooltip="If portfolio drops this % from highest point, trading halts permanently. Default: 15%" />
+                <ParamInput label="Daily Loss Limit %" value={riskDailyLoss} onChange={setRiskDailyLoss} min={1} max={50} tooltip="Maximum loss allowed in a single day before trading pauses. Resets at midnight. Default: 5%" />
+                <ParamInput label="Max Order (USDT)" value={riskMaxOrder} onChange={setRiskMaxOrder} min={10} max={100000} step={10} tooltip="Maximum value (in USDT) for a single order. Default: $1,000" />
+                <ParamInput label="Min Confidence %" value={riskMinConfidence} onChange={setRiskMinConfidence} min={0} max={100} tooltip="Minimum aggregated signal confidence required to execute a trade. Default: 40%" />
+                <ParamInput label="Risk Per Trade %" value={riskPerTrade} onChange={setRiskPerTrade} min={0.1} max={10} step={0.1} tooltip="Portfolio percentage risked per trade for ATR position sizing. Lower = smaller positions. Default: 1%" />
+                <ParamInput label="Partial TP Ratio %" value={partialTpRatio} onChange={setPartialTpRatio} min={10} max={100} tooltip="Fraction of position sold at the first ATR take-profit target. Remainder has stop moved to breakeven. Default: 50%" />
+              </div>
+            </div>
+
+            <div>
+              <h3 className="text-xs font-medium text-[var(--accent-yellow,#eab308)] mb-2">ATR Dynamic Stops</h3>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <ParamInput label="ATR Stop Mult." value={atrStopMult} onChange={setAtrStopMult} min={0.5} max={5} step={0.1} tooltip="ATR multiplier for stop-loss distance from entry. Higher = wider stop. Default: 2.0" />
+                <ParamInput label="ATR TP Mult." value={atrTpMult} onChange={setAtrTpMult} min={0.5} max={10} step={0.1} tooltip="ATR multiplier for take-profit target above entry. Higher = farther target. Default: 3.0" />
+                <ParamInput label="ATR Trailing Mult." value={atrTrailingMult} onChange={setAtrTrailingMult} min={0.5} max={5} step={0.1} tooltip="ATR multiplier for trailing stop distance from peak. Lower = tighter trailing. Default: 1.5" />
+              </div>
+            </div>
+
+            <div>
+              <h3 className="text-xs font-medium text-[var(--text-primary)] mb-2">Trading Guards</h3>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <ParamInput label="Volume Min Mult." value={volumeMinMult} onChange={setVolumeMinMult} min={0} max={5} step={0.1} tooltip="Minimum volume/SMA-20 ratio to confirm signals. 0 = disabled. 1.2 = volume must be 20% above average. Default: 1.2" />
+                <div>
+                  <div className="flex items-center gap-2 mb-1" title="Only BUY when price is above EMA, only SELL when below. Prevents counter-trend trades.">
+                    <input type="checkbox" checked={emaTrendEnabled} onChange={(e) => setEmaTrendEnabled(e.target.checked)} className="w-4 h-4 rounded accent-[var(--accent)] cursor-pointer" />
+                    <span className="text-xs text-[var(--text-secondary)] border-b border-dotted border-[var(--text-secondary)]/40 cursor-help">EMA Trend Filter</span>
+                  </div>
+                  {emaTrendEnabled && (
+                    <ParamInput label="EMA Period" value={emaTrendPeriod} onChange={setEmaTrendPeriod} min={10} max={200} tooltip="EMA period for trend filter. 50 is a common medium-term trend indicator. Default: 50" />
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -777,10 +831,14 @@ export function BacktestPanel() {
                 <AIStatItem label="Total Slippage" value={Number(result.report.engine_stats.total_slippage.toFixed(2))} color="text-[var(--accent-red)]" tooltip="Total estimated slippage cost during the backtest." />
                 <AIStatItem label="Stop-Loss Exits" value={result.report.engine_stats.stop_loss_exits} tooltip="Positions automatically closed by fixed stop-loss." />
                 <AIStatItem label="Trailing Stop Exits" value={result.report.engine_stats.trailing_stop_exits} tooltip="Positions automatically closed by trailing stop." />
-                <AIStatItem label="Take-Profit Exits" value={result.report.engine_stats.take_profit_exits} color="text-[var(--accent-green)]" tooltip="Positions where profit was automatically taken." />
+                <AIStatItem label="Take-Profit Exits" value={result.report.engine_stats.take_profit_exits} color="text-[var(--accent-green)]" tooltip="Positions closed at ATR take-profit target." />
+                <AIStatItem label="Partial TP Exits" value={result.report.engine_stats.partial_tp_exits} color="text-[var(--accent-green)]" tooltip="Partial position sales at first take-profit target." />
                 <AIStatItem label="Low Confidence Skips" value={result.report.engine_stats.signals_below_confidence} tooltip="Signals filtered out because confidence was below the minimum threshold." />
                 <AIStatItem label="Cooldown Skips" value={result.report.engine_stats.cooldown_skips} tooltip="Signals skipped because the cooldown period between trades hadn't elapsed." />
-                <AIStatItem label="Regime Filtered" value={result.report.engine_stats.regime_filtered} tooltip="Candles where signals were skipped because ADX indicated a strong trend (mean-reversion unsafe)." />
+                <AIStatItem label="Daily Loss Skips" value={result.report.engine_stats.daily_loss_skips} tooltip="Signals skipped because daily loss limit was already hit." />
+                <AIStatItem label="Regime Filtered" value={result.report.engine_stats.regime_filtered} tooltip="Candles where signals were skipped because ADX indicated a strong trend." />
+                <AIStatItem label="Volume Filtered" value={result.report.engine_stats.volume_filtered} tooltip="Signals blocked by volume confirmation filter (volume too low vs SMA-20)." />
+                <AIStatItem label="EMA Filtered" value={result.report.engine_stats.ema_filtered} tooltip="Signals blocked by EMA trend filter (counter-trend trade)." />
               </div>
               {result.report.engine_stats.drawdown_halt_candle !== null && (
                 <div className="mt-2 text-xs text-[var(--accent-red)] font-medium">
