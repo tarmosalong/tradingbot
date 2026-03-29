@@ -90,10 +90,11 @@ def patch_paper_dashboard_settings(
         data["trading"]["poll_interval_seconds"] = int(poll_interval_seconds)
 
     if strategies_enabled is not None:
-        filtered = [s for s in strategies_enabled if s in ALLOWED_STRATEGIES]
-        if not filtered:
-            raise ValueError("at least one valid strategy required")
+        if not strategies_enabled:
+            raise ValueError("strategies list must not be empty")
+        if not any(s in ALLOWED_STRATEGIES for s in strategies_enabled):
+            raise ValueError("at least one registered technical strategy required")
         data.setdefault("strategies", {})
-        data["strategies"]["enabled"] = filtered
+        data["strategies"]["enabled"] = list(strategies_enabled)
 
     write_raw_config(data, path)

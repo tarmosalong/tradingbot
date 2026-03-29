@@ -85,13 +85,18 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
   }
 
   async function handleSave() {
+    if (!config) return;
     setBusy(true);
     setMsg(null);
     const pairList = pairs
       .split(',')
       .map((p) => p.trim())
       .filter(Boolean);
-    const strategies = BUILDABLE_STRATEGIES.filter((k) => selected.has(k));
+    const buildableOn = BUILDABLE_STRATEGIES.filter((k) => selected.has(k));
+    const passthrough = (config.strategies ?? []).filter(
+      (s) => !(BUILDABLE_STRATEGIES as readonly string[]).includes(s),
+    );
+    const strategies = [...passthrough, ...buildableOn];
     const poll = parseInt(pollSec, 10);
     const bal = parseFloat(balance);
     try {

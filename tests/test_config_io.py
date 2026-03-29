@@ -43,19 +43,24 @@ def test_patch_rejects_empty_pairs(tmp_path: Path) -> None:
         patch_paper_dashboard_settings(pairs=[], path=p)
 
 
-def test_patch_strategies_filters_registry(tmp_path: Path) -> None:
+def test_patch_strategies_keeps_non_registry_names(tmp_path: Path) -> None:
     p = tmp_path / "config.yaml"
     write_raw_config({"strategies": {"enabled": ["rsi"]}}, path=p)
     patch_paper_dashboard_settings(
-        strategies_enabled=["rsi", "macd", "unknown"],
+        strategies_enabled=["ai_filter", "rsi", "macd", "sentiment"],
         path=p,
     )
     data = yaml.safe_load(p.read_text())
-    assert data["strategies"]["enabled"] == ["rsi", "macd"]
+    assert data["strategies"]["enabled"] == [
+        "ai_filter",
+        "rsi",
+        "macd",
+        "sentiment",
+    ]
 
 
-def test_patch_rejects_no_valid_strategies(tmp_path: Path) -> None:
+def test_patch_rejects_no_registered_technical_strategy(tmp_path: Path) -> None:
     p = tmp_path / "config.yaml"
     write_raw_config({}, path=p)
-    with pytest.raises(ValueError, match="strategy"):
-        patch_paper_dashboard_settings(strategies_enabled=["not_a_strategy"], path=p)
+    with pytest.raises(ValueError, match="registered technical"):
+        patch_paper_dashboard_settings(strategies_enabled=["ai_filter", "sentiment"], path=p)
