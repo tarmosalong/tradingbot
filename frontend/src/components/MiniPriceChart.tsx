@@ -12,7 +12,19 @@ import type { OhlcvCandle } from '../api';
 
 interface MiniPriceChartProps {
   symbol: string;
-  timeframe?: string;
+  /** Earliest signal timestamp (ISO) — chart will cover the same window */
+  sinceTimestamp?: string;
+}
+
+function pickTimeframeAndLimit(sinceTs?: string): { tf: string; limit: number; label: string } {
+  if (!sinceTs) return { tf: '1h', limit: 80, label: '1h' };
+  const spanMs = Date.now() - new Date(sinceTs).getTime();
+  const spanMin = spanMs / 60_000;
+
+  if (spanMin < 120) return { tf: '1m', limit: Math.max(Math.ceil(spanMin * 1.2), 30), label: '1m' };
+  if (spanMin < 720) return { tf: '5m', limit: Math.max(Math.ceil((spanMin / 5) * 1.2), 30), label: '5m' };
+  if (spanMin < 2880) return { tf: '15m', limit: Math.max(Math.ceil((spanMin / 15) * 1.2), 30), label: '15m' };
+  return { tf: '1h', limit: Math.max(Math.ceil((spanMin / 60) * 1.2), 30), label: '1h' };
 }
 
 const COLORS = {
@@ -26,16 +38,18 @@ const COLORS = {
   volumeDown: 'rgba(239, 68, 68, 0.12)',
 };
 
-export function MiniPriceChart({ symbol, timeframe = '1h' }: MiniPriceChartProps) {
+export function MiniPriceChart({ symbol, sinceTimestamp }: MiniPriceChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const [candles, setCandles] = useState<OhlcvCandle[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const { tf, limit, label } = pickTimeframeAndLimit(sinceTimestamp);
+
   const fetchData = useCallback(async () => {
     try {
-      const data = await api.ohlcv(symbol, timeframe, 80);
+      const data = await api.ohlcv(symbol, tf, Math.min(limit, 200));
       setCandles(data);
       setError(null);
     } catch (e) {
@@ -43,7 +57,7 @@ export function MiniPriceChart({ symbol, timeframe = '1h' }: MiniPriceChartProps
     } finally {
       setLoading(false);
     }
-  }, [symbol, timeframe]);
+  }, [symbol, tf, limit]);
 
   useEffect(() => {
     fetchData();
@@ -158,7 +172,7 @@ export function MiniPriceChart({ symbol, timeframe = '1h' }: MiniPriceChartProps
             Price chart
           </span>
           <span className="text-[10px] text-[var(--text-secondary)] px-1.5 py-0.5 rounded bg-[var(--bg-secondary)]">
-            {timeframe}
+            {label}
           </span>
         </div>
         {lastCandle && (

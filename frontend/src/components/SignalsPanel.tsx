@@ -567,8 +567,11 @@ export function SignalsPanel({ refreshTrigger }: SignalsPanelProps) {
                     </p>
                   </div>
 
-                  {/* Price chart */}
-                  <MiniPriceChart symbol={symbol} />
+                  {/* Price chart — same time window as signal history */}
+                  <MiniPriceChart
+                    symbol={symbol}
+                    sinceTimestamp={history.length > 0 ? history[0].timestamp : undefined}
+                  />
 
                   {/* Strategy charts */}
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
