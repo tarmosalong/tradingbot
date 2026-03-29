@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   AreaChart,
   Area,
@@ -121,6 +121,122 @@ const POPULAR_SYMBOLS = [
   'XRP/USDT', 'ADA/USDT', 'DOGE/USDT', 'AVAX/USDT',
 ];
 
+interface BacktestProfile {
+  label: string;
+  desc: string;
+  icon: string;
+  rsi: { period: number; oversold: number; overbought: number };
+  macd: { fast: number; slow: number; signal: number };
+  bollinger: { period: number; std_dev: number };
+  risk: {
+    maxPos: number;
+    stopLoss: number;
+    trailingStop: number;
+    maxDrawdown: number;
+    dailyLoss: number;
+    maxOrder: number;
+    minConfidence: number;
+    atrStop: number;
+    atrTp: number;
+    atrTrailing: number;
+    volumeMin: number;
+    emaPeriod: number;
+    emaEnabled: boolean;
+    riskPerTrade: number;
+    partialTp: number;
+  };
+  engine: {
+    fee: number;
+    slippage: number;
+    cooldown: number;
+    dynamicSizing: boolean;
+    regimeFilter: boolean;
+  };
+}
+
+const PROFILES: Record<string, BacktestProfile> = {
+  conservative: {
+    label: 'Conservative',
+    desc: 'Low risk, wide ATR stops, strong filters. Best for beginners or volatile markets.',
+    icon: '\u{1F6E1}',
+    rsi: { period: 14, oversold: 25, overbought: 75 },
+    macd: { fast: 12, slow: 26, signal: 9 },
+    bollinger: { period: 20, std_dev: 2.5 },
+    risk: {
+      maxPos: 5, stopLoss: 5, trailingStop: 3, maxDrawdown: 10,
+      dailyLoss: 3, maxOrder: 500, minConfidence: 60,
+      atrStop: 2.5, atrTp: 4.0, atrTrailing: 2.0,
+      volumeMin: 1.5, emaPeriod: 50, emaEnabled: true,
+      riskPerTrade: 0.5, partialTp: 50,
+    },
+    engine: { fee: 0.1, slippage: 0.05, cooldown: 3, dynamicSizing: false, regimeFilter: true },
+  },
+  balanced: {
+    label: 'Balanced',
+    desc: 'Standard settings. Good balance of risk and reward for most conditions.',
+    icon: '\u2696',
+    rsi: { period: 14, oversold: 30, overbought: 70 },
+    macd: { fast: 12, slow: 26, signal: 9 },
+    bollinger: { period: 20, std_dev: 2.0 },
+    risk: {
+      maxPos: 10, stopLoss: 3, trailingStop: 2, maxDrawdown: 15,
+      dailyLoss: 5, maxOrder: 1000, minConfidence: 40,
+      atrStop: 2.0, atrTp: 3.0, atrTrailing: 1.5,
+      volumeMin: 1.2, emaPeriod: 50, emaEnabled: true,
+      riskPerTrade: 1.0, partialTp: 50,
+    },
+    engine: { fee: 0.1, slippage: 0.05, cooldown: 0, dynamicSizing: false, regimeFilter: false },
+  },
+  aggressive: {
+    label: 'Aggressive',
+    desc: 'Higher risk, tighter stops, larger positions. More trades, more potential reward.',
+    icon: '\u{1F525}',
+    rsi: { period: 10, oversold: 35, overbought: 65 },
+    macd: { fast: 8, slow: 21, signal: 5 },
+    bollinger: { period: 15, std_dev: 1.5 },
+    risk: {
+      maxPos: 20, stopLoss: 2, trailingStop: 1, maxDrawdown: 30,
+      dailyLoss: 10, maxOrder: 3000, minConfidence: 25,
+      atrStop: 1.5, atrTp: 2.5, atrTrailing: 1.0,
+      volumeMin: 0.8, emaPeriod: 30, emaEnabled: false,
+      riskPerTrade: 2.0, partialTp: 40,
+    },
+    engine: { fee: 0.1, slippage: 0.05, cooldown: 0, dynamicSizing: true, regimeFilter: false },
+  },
+  scalper: {
+    label: 'Scalper',
+    desc: 'Very short-term, fast signals, tight ATR stops. For high-frequency backtesting.',
+    icon: '\u26A1',
+    rsi: { period: 7, oversold: 35, overbought: 65 },
+    macd: { fast: 5, slow: 13, signal: 4 },
+    bollinger: { period: 10, std_dev: 1.5 },
+    risk: {
+      maxPos: 15, stopLoss: 1, trailingStop: 1, maxDrawdown: 15,
+      dailyLoss: 5, maxOrder: 2000, minConfidence: 20,
+      atrStop: 1.0, atrTp: 2.0, atrTrailing: 0.8,
+      volumeMin: 1.0, emaPeriod: 20, emaEnabled: false,
+      riskPerTrade: 1.5, partialTp: 60,
+    },
+    engine: { fee: 0.1, slippage: 0.1, cooldown: 0, dynamicSizing: true, regimeFilter: false },
+  },
+  hodl: {
+    label: 'HODL',
+    desc: 'Long-term signals only. Wide filters, large ATR stops, fewer trades. Ride the trend.',
+    icon: '\u{1F4C8}',
+    rsi: { period: 21, oversold: 20, overbought: 80 },
+    macd: { fast: 16, slow: 36, signal: 12 },
+    bollinger: { period: 30, std_dev: 2.5 },
+    risk: {
+      maxPos: 10, stopLoss: 8, trailingStop: 5, maxDrawdown: 25,
+      dailyLoss: 8, maxOrder: 2000, minConfidence: 50,
+      atrStop: 3.0, atrTp: 5.0, atrTrailing: 2.5,
+      volumeMin: 1.5, emaPeriod: 100, emaEnabled: true,
+      riskPerTrade: 0.5, partialTp: 30,
+    },
+    engine: { fee: 0.1, slippage: 0.05, cooldown: 5, dynamicSizing: false, regimeFilter: true },
+  },
+};
+
 export function BacktestPanel() {
   const [symbol, setSymbol] = useState('BTC/USDT');
   const [timeframe, setTimeframe] = useState('1h');
@@ -185,6 +301,88 @@ export function BacktestPanel() {
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
+
+  const activeProfile = useMemo(() => {
+    for (const [id, p] of Object.entries(PROFILES)) {
+      if (
+        rsiPeriod === p.rsi.period &&
+        rsiOversold === p.rsi.oversold &&
+        rsiOverbought === p.rsi.overbought &&
+        macdFast === p.macd.fast &&
+        macdSlow === p.macd.slow &&
+        macdSignal === p.macd.signal &&
+        bollPeriod === p.bollinger.period &&
+        bollStdDev === p.bollinger.std_dev &&
+        riskMaxPos === p.risk.maxPos &&
+        riskStopLoss === p.risk.stopLoss &&
+        riskTrailingStop === p.risk.trailingStop &&
+        riskMaxDrawdown === p.risk.maxDrawdown &&
+        riskDailyLoss === p.risk.dailyLoss &&
+        riskMaxOrder === p.risk.maxOrder &&
+        riskMinConfidence === p.risk.minConfidence &&
+        atrStopMult === p.risk.atrStop &&
+        atrTpMult === p.risk.atrTp &&
+        atrTrailingMult === p.risk.atrTrailing &&
+        volumeMinMult === p.risk.volumeMin &&
+        emaTrendPeriod === p.risk.emaPeriod &&
+        emaTrendEnabled === p.risk.emaEnabled &&
+        riskPerTrade === p.risk.riskPerTrade &&
+        partialTpRatio === p.risk.partialTp &&
+        feeRate === p.engine.fee &&
+        slippageRate === p.engine.slippage &&
+        cooldownCandles === p.engine.cooldown &&
+        dynamicSizing === p.engine.dynamicSizing &&
+        regimeFilter === p.engine.regimeFilter
+      ) {
+        return id;
+      }
+    }
+    return null;
+  }, [
+    rsiPeriod, rsiOversold, rsiOverbought,
+    macdFast, macdSlow, macdSignal,
+    bollPeriod, bollStdDev,
+    riskMaxPos, riskStopLoss, riskTrailingStop,
+    riskMaxDrawdown, riskDailyLoss, riskMaxOrder, riskMinConfidence,
+    atrStopMult, atrTpMult, atrTrailingMult,
+    volumeMinMult, emaTrendPeriod, emaTrendEnabled,
+    riskPerTrade, partialTpRatio,
+    feeRate, slippageRate, cooldownCandles,
+    dynamicSizing, regimeFilter,
+  ]);
+
+  function applyProfile(id: string) {
+    const p = PROFILES[id];
+    if (!p) return;
+    setRsiPeriod(p.rsi.period);
+    setRsiOversold(p.rsi.oversold);
+    setRsiOverbought(p.rsi.overbought);
+    setMacdFast(p.macd.fast);
+    setMacdSlow(p.macd.slow);
+    setMacdSignal(p.macd.signal);
+    setBollPeriod(p.bollinger.period);
+    setBollStdDev(p.bollinger.std_dev);
+    setRiskMaxPos(p.risk.maxPos);
+    setRiskStopLoss(p.risk.stopLoss);
+    setRiskTrailingStop(p.risk.trailingStop);
+    setRiskMaxDrawdown(p.risk.maxDrawdown);
+    setRiskDailyLoss(p.risk.dailyLoss);
+    setRiskMaxOrder(p.risk.maxOrder);
+    setRiskMinConfidence(p.risk.minConfidence);
+    setAtrStopMult(p.risk.atrStop);
+    setAtrTpMult(p.risk.atrTp);
+    setAtrTrailingMult(p.risk.atrTrailing);
+    setVolumeMinMult(p.risk.volumeMin);
+    setEmaTrendPeriod(p.risk.emaPeriod);
+    setEmaTrendEnabled(p.risk.emaEnabled);
+    setRiskPerTrade(p.risk.riskPerTrade);
+    setPartialTpRatio(p.risk.partialTp);
+    setFeeRate(p.engine.fee);
+    setSlippageRate(p.engine.slippage);
+    setCooldownCandles(p.engine.cooldown);
+    setDynamicSizing(p.engine.dynamicSizing);
+    setRegimeFilter(p.engine.regimeFilter);
+  }
 
   const toggleStrategy = (id: string) => {
     setEnabledStrategies((prev) => {
@@ -442,6 +640,54 @@ export function BacktestPanel() {
 
         {showAdvanced && (
           <div className="mt-3 space-y-4 border-t border-[var(--border)] pt-4">
+            {/* Profiles */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-xs font-medium text-[var(--text-secondary)]">Profiles</h3>
+                <button
+                  type="button"
+                  onClick={() => applyProfile('balanced')}
+                  className="text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer transition-colors"
+                >
+                  Reset to Defaults
+                </button>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
+                {Object.entries(PROFILES).map(([id, p]) => {
+                  const isActive = activeProfile === id;
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => applyProfile(id)}
+                      title={p.desc}
+                      className={`relative px-3 py-2 rounded-lg text-left border transition-all cursor-pointer ${
+                        isActive
+                          ? 'bg-[var(--accent)]/10 border-[var(--accent)] ring-1 ring-[var(--accent)]/30'
+                          : 'bg-[var(--bg-secondary)] border-[var(--border)] hover:border-[var(--text-secondary)]'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <span className="text-sm">{p.icon}</span>
+                        <span className={`text-xs font-medium ${isActive ? 'text-[var(--accent)]' : ''}`}>
+                          {p.label}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-[var(--text-secondary)] leading-tight line-clamp-2">{p.desc}</p>
+                      {isActive && (
+                        <span className="absolute top-1 right-1.5 text-[var(--accent)] text-[10px] font-bold">{'\u2713'}</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+              {activeProfile === null && (
+                <p className="text-[10px] text-[var(--text-secondary)] mt-1.5 italic">
+                  Custom settings — does not match any profile
+                </p>
+              )}
+            </div>
+
             {enabledStrategies.has('rsi') && (
               <div>
                 <h3 className="text-xs font-medium text-[var(--accent)] mb-2">RSI Parameters</h3>
