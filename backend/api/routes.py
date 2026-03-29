@@ -335,6 +335,49 @@ async def run_backtest(req: BacktestRequest):
     return response
 
 
+@router.get("/ohlcv")
+async def get_ohlcv(
+    symbol: str = "BTC/USDT",
+    timeframe: str = "1h",
+    limit: int = 100,
+):
+    """Return OHLCV candle data directly from Binance."""
+    from backend.config import Settings
+    from backend.exchange.binance_client import BinanceClient
+
+    settings = load_settings()
+    client = BinanceClient(
+        Settings(
+            trading=settings.trading,
+            exchange=settings.exchange,
+            paper_trading=settings.paper_trading,
+            strategies=settings.strategies,
+            ai=settings.ai,
+            risk=settings.risk,
+            binance_api_key="",
+            binance_api_secret="",
+            anthropic_api_key="",
+            log_level=settings.log_level,
+        )
+    )
+    try:
+        df = await client.get_ohlcv(symbol, timeframe, limit)
+    finally:
+        await client.close()
+
+    return [
+        {
+            "time": int(row["timestamp"].timestamp()),
+            "open": float(row["open"]),
+            "high": float(row["high"]),
+            "low": float(row["low"]),
+            "close": float(row["close"]),
+            "volume": float(row["volume"]),
+        }
+        for _, row in df.iterrows()
+    ]
+
+
 class PaperBotSettingsPatch(BaseModel):
     initial_balance_usdt: float | None = None
     pairs: list[str] | None = None

@@ -147,6 +147,15 @@ export interface PositionsResponse {
   exit_rules: ExitRule[];
 }
 
+export interface OhlcvCandle {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
 export const api = {
   health: () => fetchJson<{ status: string }>('/health'),
   config: () => fetchJson<BotConfig>('/config'),
@@ -157,6 +166,8 @@ export const api = {
   portfolio: (limit = 100) =>
     fetchJson<PortfolioSnapshot[]>(`/portfolio?limit=${limit}`),
   signals: (limit = 50) => fetchJson<SignalEntry[]>(`/signals?limit=${limit}`),
+  ohlcv: (symbol = 'BTC/USDT', timeframe = '1h', limit = 100) =>
+    fetchJson<OhlcvCandle[]>(`/ohlcv?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}&limit=${limit}`),
   botStatus: () => fetchJson<BotStatus>('/bot/status'),
   botStart: () =>
     fetchJsonRequest<{ ok: boolean } & BotStatus>('/bot/start', { method: 'POST' }),

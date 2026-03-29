@@ -10,6 +10,7 @@ import {
 } from 'recharts';
 import { api } from '../api';
 import type { SignalEntry } from '../api';
+import { MiniPriceChart } from './MiniPriceChart';
 
 /* ── Friendly labels ── */
 
@@ -566,7 +567,10 @@ export function SignalsPanel({ refreshTrigger }: SignalsPanelProps) {
                     </p>
                   </div>
 
-                  {/* Charts */}
+                  {/* Price chart */}
+                  <MiniPriceChart symbol={symbol} />
+
+                  {/* Strategy charts */}
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                     <div className="rounded-lg border border-[var(--border)] p-3 bg-[var(--bg-primary)]/30">
                       <ConfidenceTimeline history={history} />
