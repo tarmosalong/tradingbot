@@ -28,7 +28,9 @@ async def get_config():
         "poll_interval": settings.trading.poll_interval_seconds,
         "strategies": settings.strategies.enabled,
         "paper_trading": {
-            "initial_balance_usdt": settings.paper_trading.initial_balance_usdt,
+            "initial_balance_usdt": (
+                settings.paper_trading.initial_balance_usdt
+            ),
         },
         "risk": {
             "max_position_pct": settings.risk.max_position_pct,
@@ -37,6 +39,22 @@ async def get_config():
             "max_drawdown_pct": settings.risk.max_drawdown_pct,
             "daily_loss_limit_pct": settings.risk.daily_loss_limit_pct,
             "max_single_order_usdt": settings.risk.max_single_order_usdt,
+        },
+        "strategy_params": {
+            "rsi": {
+                "period": settings.strategies.rsi.period,
+                "oversold": settings.strategies.rsi.oversold,
+                "overbought": settings.strategies.rsi.overbought,
+            },
+            "macd": {
+                "fast": settings.strategies.macd.fast,
+                "slow": settings.strategies.macd.slow,
+                "signal": settings.strategies.macd.signal,
+            },
+            "bollinger": {
+                "period": settings.strategies.bollinger.period,
+                "std_dev": settings.strategies.bollinger.std_dev,
+            },
         },
     }
 
@@ -378,12 +396,42 @@ async def get_ohlcv(
     ]
 
 
+class RSIPatch(BaseModel):
+    period: int | None = None
+    oversold: int | None = None
+    overbought: int | None = None
+
+
+class MACDPatch(BaseModel):
+    fast: int | None = None
+    slow: int | None = None
+    signal: int | None = None
+
+
+class BollingerPatch(BaseModel):
+    period: int | None = None
+    std_dev: float | None = None
+
+
+class RiskPatch(BaseModel):
+    max_position_pct: float | None = None
+    stop_loss_pct: float | None = None
+    trailing_stop_pct: float | None = None
+    max_drawdown_pct: float | None = None
+    daily_loss_limit_pct: float | None = None
+    max_single_order_usdt: float | None = None
+
+
 class PaperBotSettingsPatch(BaseModel):
     initial_balance_usdt: float | None = None
     pairs: list[str] | None = None
     timeframe: str | None = None
     poll_interval_seconds: int | None = None
     strategies: list[str] | None = None
+    rsi: RSIPatch | None = None
+    macd: MACDPatch | None = None
+    bollinger: BollingerPatch | None = None
+    risk: RiskPatch | None = None
 
 
 @router.get("/bot/status")
@@ -512,6 +560,24 @@ async def bot_patch_settings(body: PaperBotSettingsPatch):
             timeframe=body.timeframe,
             poll_interval_seconds=body.poll_interval_seconds,
             strategies_enabled=body.strategies,
+            rsi_params=(
+                body.rsi.model_dump(exclude_none=True) if body.rsi else None
+            ),
+            macd_params=(
+                body.macd.model_dump(exclude_none=True)
+                if body.macd
+                else None
+            ),
+            bollinger_params=(
+                body.bollinger.model_dump(exclude_none=True)
+                if body.bollinger
+                else None
+            ),
+            risk_params=(
+                body.risk.model_dump(exclude_none=True)
+                if body.risk
+                else None
+            ),
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

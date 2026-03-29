@@ -47,6 +47,11 @@ export interface BotConfig {
     daily_loss_limit_pct: number;
     max_single_order_usdt: number;
   };
+  strategy_params?: {
+    rsi: { period: number; oversold: number; overbought: number };
+    macd: { fast: number; slow: number; signal: number };
+    bollinger: { period: number; std_dev: number };
+  };
 }
 
 async function fetchJson<T>(path: string): Promise<T> {
@@ -110,12 +115,42 @@ export interface BotStatus {
   last_error: string | null;
 }
 
+export interface RSIParams {
+  period?: number;
+  oversold?: number;
+  overbought?: number;
+}
+
+export interface MACDParams {
+  fast?: number;
+  slow?: number;
+  signal?: number;
+}
+
+export interface BollingerParams {
+  period?: number;
+  std_dev?: number;
+}
+
+export interface RiskParams {
+  max_position_pct?: number;
+  stop_loss_pct?: number;
+  trailing_stop_pct?: number;
+  max_drawdown_pct?: number;
+  daily_loss_limit_pct?: number;
+  max_single_order_usdt?: number;
+}
+
 export interface PaperBotSettingsBody {
   initial_balance_usdt?: number;
   pairs?: string[];
   timeframe?: string;
   poll_interval_seconds?: number;
   strategies?: string[];
+  rsi?: RSIParams;
+  macd?: MACDParams;
+  bollinger?: BollingerParams;
+  risk?: RiskParams;
 }
 
 export interface OpenPosition {

@@ -47,28 +47,22 @@ def patch_paper_dashboard_settings(
     timeframe: str | None = None,
     poll_interval_seconds: int | None = None,
     strategies_enabled: list[str] | None = None,
+    rsi_params: dict[str, Any] | None = None,
+    macd_params: dict[str, Any] | None = None,
+    bollinger_params: dict[str, Any] | None = None,
+    risk_params: dict[str, Any] | None = None,
     path: Path | None = None,
 ) -> None:
     """Merge allowed keys into config.yaml. Does not change trading.mode."""
-    if all(
-        x is None
-        for x in (
-            initial_balance_usdt,
-            pairs,
-            timeframe,
-            poll_interval_seconds,
-            strategies_enabled,
-        )
-    ):
-        return
-
     data = load_raw_config(path)
 
     if initial_balance_usdt is not None:
         if initial_balance_usdt < 100 or initial_balance_usdt > 1_000_000_000:
             raise ValueError("initial_balance_usdt out of allowed range")
         data.setdefault("paper_trading", {})
-        data["paper_trading"]["initial_balance_usdt"] = float(initial_balance_usdt)
+        data["paper_trading"]["initial_balance_usdt"] = float(
+            initial_balance_usdt,
+        )
 
     if pairs is not None:
         cleaned = [p.strip() for p in pairs if p and p.strip()]
@@ -78,7 +72,10 @@ def patch_paper_dashboard_settings(
         data["trading"]["pairs"] = cleaned
 
     if timeframe is not None:
-        if timeframe not in ("1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d"):
+        valid_tf = (
+            "1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "1d",
+        )
+        if timeframe not in valid_tf:
             raise ValueError("unsupported timeframe")
         data.setdefault("trading", {})
         data["trading"]["timeframe"] = timeframe
@@ -87,14 +84,67 @@ def patch_paper_dashboard_settings(
         if poll_interval_seconds < 10 or poll_interval_seconds > 86_400:
             raise ValueError("poll_interval_seconds out of range")
         data.setdefault("trading", {})
-        data["trading"]["poll_interval_seconds"] = int(poll_interval_seconds)
+        data["trading"]["poll_interval_seconds"] = int(
+            poll_interval_seconds,
+        )
 
     if strategies_enabled is not None:
         if not strategies_enabled:
             raise ValueError("strategies list must not be empty")
         if not any(s in ALLOWED_STRATEGIES for s in strategies_enabled):
-            raise ValueError("at least one registered technical strategy required")
+            raise ValueError(
+                "at least one registered technical strategy required",
+            )
         data.setdefault("strategies", {})
         data["strategies"]["enabled"] = list(strategies_enabled)
 
+    if rsi_params is not None:
+        data.setdefault("strategies", {}).setdefault("rsi", {})
+        _merge_bounded(data["strategies"]["rsi"], rsi_params, {
+            "period": (2, 50),
+            "oversold": (5, 45),
+            "overbought": (55, 95),
+        })
+
+    if macd_params is not None:
+        data.setdefault("strategies", {}).setdefault("macd", {})
+        _merge_bounded(data["strategies"]["macd"], macd_params, {
+            "fast": (2, 50),
+            "slow": (10, 100),
+            "signal": (2, 50),
+        })
+
+    if bollinger_params is not None:
+        data.setdefault("strategies", {}).setdefault("bollinger", {})
+        _merge_bounded(data["strategies"]["bollinger"], bollinger_params, {
+            "period": (5, 50),
+            "std_dev": (0.5, 4.0),
+        })
+
+    if risk_params is not None:
+        data.setdefault("risk", {})
+        _merge_bounded(data["risk"], risk_params, {
+            "max_position_pct": (0.01, 1.0),
+            "stop_loss_pct": (0.0, 0.20),
+            "trailing_stop_pct": (0.0, 0.20),
+            "max_drawdown_pct": (0.01, 0.50),
+            "daily_loss_limit_pct": (0.01, 0.50),
+            "max_single_order_usdt": (10, 100_000),
+        })
+
     write_raw_config(data, path)
+
+
+def _merge_bounded(
+    target: dict[str, Any],
+    source: dict[str, Any],
+    bounds: dict[str, tuple[float, float]],
+) -> None:
+    for key, (lo, hi) in bounds.items():
+        if key in source and source[key] is not None:
+            val = float(source[key])
+            if val < lo or val > hi:
+                raise ValueError(
+                    f"{key}={val} out of range [{lo}, {hi}]",
+                )
+            target[key] = int(val) if isinstance(lo, int) else val
