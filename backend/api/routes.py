@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from backend.api.bot_runner import bot_runner
 from backend.api.deps import get_database
 from backend.config import load_settings
+from backend.config_io import patch_paper_dashboard_settings
 
 router = APIRouter()
 
@@ -321,3 +323,66 @@ async def run_backtest(req: BacktestRequest):
         response["walk_forward"] = wf_result.to_dict()
 
     return response
+
+
+class PaperBotSettingsPatch(BaseModel):
+    initial_balance_usdt: float | None = None
+    pairs: list[str] | None = None
+    timeframe: str | None = None
+    poll_interval_seconds: int | None = None
+    strategies: list[str] | None = None
+
+
+@router.get("/bot/status")
+async def bot_status():
+    return bot_runner.status_dict()
+
+
+@router.post("/bot/start")
+async def bot_start():
+    if not bot_runner.status_dict()["control_enabled"]:
+        raise HTTPException(status_code=403, detail="Bot control disabled")
+    try:
+        await bot_runner.start()
+    except RuntimeError as e:
+        msg = str(e)
+        code = 409 if "already" in msg.lower() else 400
+        raise HTTPException(status_code=code, detail=msg) from e
+    return {"ok": True, **bot_runner.status_dict()}
+
+
+@router.post("/bot/stop")
+async def bot_stop():
+    await bot_runner.stop()
+    return {"ok": True, **bot_runner.status_dict()}
+
+
+@router.patch("/bot/settings")
+async def bot_patch_settings(body: PaperBotSettingsPatch):
+    if bot_runner.state != "stopped":
+        raise HTTPException(
+            status_code=409,
+            detail="Stop the bot before changing settings",
+        )
+    try:
+        patch_paper_dashboard_settings(
+            initial_balance_usdt=body.initial_balance_usdt,
+            pairs=body.pairs,
+            timeframe=body.timeframe,
+            poll_interval_seconds=body.poll_interval_seconds,
+            strategies_enabled=body.strategies,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    settings = load_settings()
+    return {
+        "ok": True,
+        "mode": settings.trading.mode,
+        "pairs": settings.trading.pairs,
+        "timeframe": settings.trading.timeframe,
+        "poll_interval": settings.trading.poll_interval_seconds,
+        "strategies": settings.strategies.enabled,
+        "paper_trading": {
+            "initial_balance_usdt": settings.paper_trading.initial_balance_usdt,
+        },
+    }

@@ -7,6 +7,7 @@ import { StatsPanel } from './components/StatsPanel';
 import { PortfolioChart } from './components/PortfolioChart';
 import { TradesTable } from './components/TradesTable';
 import { ConfigPanel } from './components/ConfigPanel';
+import { PaperTradingPanel } from './components/PaperTradingPanel';
 import { BacktestPanel } from './components/BacktestPanel';
 
 type Tab = 'dashboard' | 'backtest';
@@ -72,6 +73,9 @@ function App() {
         {tab === 'dashboard' && (
           <>
             <StatsPanel portfolio={portfolio} trades={trades} />
+            {config?.mode === 'paper' && (
+              <PaperTradingPanel config={config} onConfigRefresh={fetchData} />
+            )}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-2">
                 <PortfolioChart data={portfolio} />

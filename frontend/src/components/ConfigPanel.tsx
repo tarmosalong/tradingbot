@@ -27,18 +27,10 @@ export function ConfigPanel({ config }: ConfigPanelProps) {
             Paper trading
           </h3>
           <p className="text-[var(--text-secondary)] text-xs leading-relaxed mb-2">
-            Simulated balance with live Binance prices. Change balance, pairs, and timing in{' '}
-            <code className="text-[var(--text-primary)] bg-[var(--bg-secondary)] px-1 rounded">
-              config.yaml
-            </code>{' '}
-            (<code className="text-[var(--text-primary)] bg-[var(--bg-secondary)] px-1 rounded">
-              paper_trading.initial_balance_usdt
-            </code>
-            ,{' '}
-            <code className="text-[var(--text-primary)] bg-[var(--bg-secondary)] px-1 rounded">
-              trading.*
-            </code>
-            ), then restart the bot process.
+            Use the <strong className="text-[var(--text-primary)] font-medium">Paper trading</strong> panel above for
+            start/stop and editing <code className="text-[var(--text-primary)] bg-[var(--bg-secondary)] px-1 rounded">config.yaml</code>{' '}
+            (or run <code className="text-[var(--accent-green)] bg-[var(--bg-secondary)] px-1 rounded text-[11px]">python -m backend.main</code>{' '}
+            for a separate process).
           </p>
           <InfoRow
             label="Starting balance (config)"
@@ -48,13 +40,6 @@ export function ConfigPanel({ config }: ConfigPanelProps) {
                 : '—'
             }
           />
-          <p className="text-[var(--text-secondary)] text-xs mt-2 pt-2 border-t border-[var(--border)]/60">
-            Run the loop:{' '}
-            <code className="text-[var(--accent-green)] bg-[var(--bg-secondary)] px-1 rounded text-[11px]">
-              python -m backend.main
-            </code>
-            — this dashboard only shows data already saved to the database.
-          </p>
         </div>
       )}
 

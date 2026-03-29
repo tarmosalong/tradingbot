@@ -773,7 +773,13 @@ All REST endpoints are prefixed with `/api`.
 | `GET` | `/api/trades` | `?symbol=&limit=50` | List of trades |
 | `GET` | `/api/orders` | `?symbol=` | Open orders |
 | `GET` | `/api/portfolio` | `?limit=100` | Portfolio history |
+| `GET` | `/api/bot/status` | — | In-process paper loop: `state`, `mode`, `control_enabled`, `last_error` |
+| `POST` | `/api/bot/start` | — | Starts `TradingEngine` inside the API process (**`trading.mode` must be `paper`**). `403` if `BOT_CONTROL_ENABLED` is false |
+| `POST` | `/api/bot/stop` | — | Stops the in-process loop (may take up to one poll interval) |
+| `PATCH` | `/api/bot/settings` | JSON body (all optional): `initial_balance_usdt`, `pairs`, `timeframe`, `poll_interval_seconds`, `strategies` | Merges allowed fields into project `config.yaml` (technical strategies only). **`409` if the bot is not stopped** |
 | `POST` | `/api/backtest` | JSON body (see below) | Report + equity + OHLCV + trades |
+
+**Paper dashboard control:** With `trading.mode: paper`, the React dashboard can start/stop the bot and edit paper settings without restarting uvicorn. Changing `initial_balance_usdt` affects the next run, not an already-running simulated book. Disable remote start/stop with `BOT_CONTROL_ENABLED=false` in `.env`.
 
 ### WebSocket
 

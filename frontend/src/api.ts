@@ -55,6 +55,54 @@ async function fetchJson<T>(path: string): Promise<T> {
   return res.json();
 }
 
+function parseErrorDetail(text: string): string {
+  try {
+    const j = JSON.parse(text) as { detail?: unknown };
+    const d = j.detail;
+    if (typeof d === 'string') return d;
+    if (Array.isArray(d)) {
+      return d
+        .map((e) => (typeof e === 'object' && e && 'msg' in e ? String((e as { msg: string }).msg) : String(e)))
+        .join('; ');
+    }
+  } catch {
+    /* use raw */
+  }
+  return text || 'Request failed';
+}
+
+async function fetchJsonRequest<T>(path: string, init: RequestInit): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(init.headers as Record<string, string>),
+    },
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    throw new Error(parseErrorDetail(text));
+  }
+  return text ? (JSON.parse(text) as T) : ({} as T);
+}
+
+export type BotRunnerState = 'stopped' | 'starting' | 'running' | 'stopping';
+
+export interface BotStatus {
+  state: BotRunnerState;
+  mode: string;
+  control_enabled: boolean;
+  last_error: string | null;
+}
+
+export interface PaperBotSettingsBody {
+  initial_balance_usdt?: number;
+  pairs?: string[];
+  timeframe?: string;
+  poll_interval_seconds?: number;
+  strategies?: string[];
+}
+
 export const api = {
   health: () => fetchJson<{ status: string }>('/health'),
   config: () => fetchJson<BotConfig>('/config'),
@@ -64,4 +112,19 @@ export const api = {
     fetchJson<Order[]>(`/orders${symbol ? `?symbol=${symbol}` : ''}`),
   portfolio: (limit = 100) =>
     fetchJson<PortfolioSnapshot[]>(`/portfolio?limit=${limit}`),
+  botStatus: () => fetchJson<BotStatus>('/bot/status'),
+  botStart: () =>
+    fetchJsonRequest<{ ok: boolean } & BotStatus>('/bot/start', { method: 'POST' }),
+  botStop: () =>
+    fetchJsonRequest<{ ok: boolean } & BotStatus>('/bot/stop', { method: 'POST' }),
+  botPatchSettings: (body: PaperBotSettingsBody) =>
+    fetchJsonRequest<{
+      ok: boolean;
+      mode: string;
+      pairs: string[];
+      timeframe: string;
+      poll_interval: number;
+      strategies: string[];
+      paper_trading: { initial_balance_usdt: number };
+    }>('/bot/settings', { method: 'PATCH', body: JSON.stringify(body) }),
 };

@@ -7,29 +7,11 @@ import sys
 from backend.config import load_settings
 from backend.core.engine import TradingEngine
 from backend.core.logger import get_logger, setup_logging
+from backend.core.strategy_factory import build_strategies
 from backend.database import Database
 from backend.exchange import create_exchange
-from backend.strategies import STRATEGY_REGISTRY
 
 logger = get_logger("main")
-
-
-def _build_strategies(settings):
-    """Instantiate enabled strategies from the registry."""
-    strategies = []
-    for name in settings.strategies.enabled:
-        cls = STRATEGY_REGISTRY.get(name)
-        if cls is None:
-            logger.warning("Unknown strategy, skipping", name=name)
-            continue
-        config_map = {
-            "rsi": settings.strategies.rsi,
-            "macd": settings.strategies.macd,
-            "bollinger": settings.strategies.bollinger,
-        }
-        config = config_map.get(name)
-        strategies.append(cls(config) if config else cls())
-    return strategies
 
 
 async def run() -> None:
@@ -46,7 +28,7 @@ async def run() -> None:
     await db.connect()
 
     exchange = create_exchange(settings)
-    strategies = _build_strategies(settings)
+    strategies = build_strategies(settings)
 
     engine = TradingEngine(
         settings=settings,
