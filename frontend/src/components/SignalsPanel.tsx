@@ -73,6 +73,95 @@ function indicatorExplain(key: string, value: number): string {
   return `${key}: ${Number.isInteger(value) ? value : value.toFixed(2)}`;
 }
 
+interface Proximity {
+  label: string;
+  pct: number;
+  side: 'buy' | 'sell';
+}
+
+function computeProximity(strategy: string, indicators: Record<string, number>): Proximity | null {
+  const s = strategy.toLowerCase();
+
+  if (s === 'rsi') {
+    const rsi = indicators.rsi;
+    if (rsi == null) return null;
+    const distBuy = rsi - 30;
+    const distSell = 70 - rsi;
+    if (distBuy <= 0) return { label: `In buy zone (RSI ${rsi.toFixed(0)})`, pct: 100, side: 'buy' };
+    if (distSell <= 0) return { label: `In sell zone (RSI ${rsi.toFixed(0)})`, pct: 100, side: 'sell' };
+    if (distBuy < distSell) {
+      const closeness = Math.round(Math.max(0, (1 - distBuy / 20) * 100));
+      return { label: `${distBuy.toFixed(0)} points from buy zone (RSI ≤ 30)`, pct: closeness, side: 'buy' };
+    }
+    const closeness = Math.round(Math.max(0, (1 - distSell / 20) * 100));
+    return { label: `${distSell.toFixed(0)} points from sell zone (RSI ≥ 70)`, pct: closeness, side: 'sell' };
+  }
+
+  if (s === 'macd') {
+    const hist = indicators.macd_histogram ?? indicators.macd_hist;
+    if (hist == null) return null;
+    const absHist = Math.abs(hist);
+    const closeness = Math.round(Math.max(0, (1 - Math.min(absHist / 5, 1)) * 100));
+    if (hist > 0) {
+      return { label: `Histogram +${hist.toFixed(2)} — crossover down at 0`, pct: closeness, side: 'sell' };
+    }
+    if (hist < 0) {
+      return { label: `Histogram ${hist.toFixed(2)} — crossover up at 0`, pct: closeness, side: 'buy' };
+    }
+    return { label: 'At crossover point', pct: 100, side: 'buy' };
+  }
+
+  if (s === 'bollinger') {
+    const close = indicators.close;
+    const lower = indicators.bb_lower;
+    const upper = indicators.bb_upper;
+    if (close == null || lower == null || upper == null) return null;
+    const width = upper - lower;
+    if (width <= 0) return null;
+    const distLower = close - lower;
+    const distUpper = upper - close;
+    if (distLower <= 0) return { label: `Below lower band — in buy zone`, pct: 100, side: 'buy' };
+    if (distUpper <= 0) return { label: `Above upper band — in sell zone`, pct: 100, side: 'sell' };
+    if (distLower < distUpper) {
+      const closeness = Math.round(Math.max(0, (1 - distLower / (width * 0.5)) * 100));
+      return { label: `$${distLower.toFixed(0)} from lower band`, pct: closeness, side: 'buy' };
+    }
+    const closeness = Math.round(Math.max(0, (1 - distUpper / (width * 0.5)) * 100));
+    return { label: `$${distUpper.toFixed(0)} from upper band`, pct: closeness, side: 'sell' };
+  }
+
+  return null;
+}
+
+function ProximityMeter({ prox }: { prox: Proximity }) {
+  const color = prox.side === 'buy' ? 'var(--accent-green)' : 'var(--accent-red)';
+  const clamped = Math.min(Math.max(prox.pct, 0), 100);
+  const hot = clamped >= 70;
+  return (
+    <div className="mt-2 pt-2 border-t border-[var(--border)]">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[10px] text-[var(--text-secondary)]">
+          Distance to {prox.side} trigger
+        </span>
+        <span className="text-[10px] font-medium" style={{ color: hot ? color : 'var(--text-secondary)' }}>
+          {clamped}% close
+        </span>
+      </div>
+      <div className="h-1.5 rounded-full bg-[var(--bg-primary)] overflow-hidden">
+        <div
+          className="h-full rounded-full transition-all duration-500"
+          style={{
+            width: `${Math.max(clamped, 2)}%`,
+            backgroundColor: color,
+            opacity: clamped < 20 ? 0.3 : clamped < 50 ? 0.5 : 0.8,
+          }}
+        />
+      </div>
+      <p className="text-[10px] text-[var(--text-secondary)] mt-0.5">{prox.label}</p>
+    </div>
+  );
+}
+
 /* ── Helpers ── */
 
 interface SignalsPanelProps { refreshTrigger: unknown }
@@ -256,13 +345,14 @@ function StrategyVerdicts({ strategies }: { strategies: SignalEntry[] }) {
     <div>
       <h3 className="text-[11px] font-medium text-[var(--text-secondary)] mb-2">
         Strategy opinions
-        <InfoTooltip text="Each strategy independently analyses the market and gives its verdict. A filled bar means a stronger signal." />
+        <InfoTooltip text="Each strategy independently analyses the market and gives its verdict. A filled bar means a stronger signal. The proximity meter shows how close the market is to triggering a trade." />
       </h3>
-      <div className="space-y-2.5">
+      <div className="space-y-3">
         {strategies.map((s) => {
           const pct = Math.round(s.confidence * 100);
           const noSignal = s.direction === 'HOLD' || pct < 1;
           const color = DIR_COLOR[s.direction] ?? 'var(--text-secondary)';
+          const prox = computeProximity(s.strategy_name, s.indicators);
           return (
             <div key={s.id}>
               <div className="flex items-center justify-between mb-1">
@@ -281,6 +371,28 @@ function StrategyVerdicts({ strategies }: { strategies: SignalEntry[] }) {
                   />
                 )}
               </div>
+              {prox && noSignal && (
+                <div className="mt-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-[var(--text-secondary)]">
+                      {prox.label}
+                    </span>
+                    <span className="text-[10px] font-medium" style={{ color: prox.pct >= 70 ? (prox.side === 'buy' ? 'var(--accent-green)' : 'var(--accent-red)') : 'var(--text-secondary)' }}>
+                      {prox.pct}% close
+                    </span>
+                  </div>
+                  <div className="h-1 rounded-full bg-[var(--bg-primary)] overflow-hidden mt-0.5">
+                    <div
+                      className="h-full rounded-full transition-all duration-500"
+                      style={{
+                        width: `${Math.max(prox.pct, 2)}%`,
+                        backgroundColor: prox.side === 'buy' ? 'var(--accent-green)' : 'var(--accent-red)',
+                        opacity: prox.pct < 20 ? 0.3 : prox.pct < 50 ? 0.5 : 0.8,
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}
@@ -295,6 +407,7 @@ function StrategyCard({ s }: { s: SignalEntry }) {
   const [open, setOpen] = useState(true);
   const info = STRATEGY_INFO[s.strategy_name];
   const indicators = Object.entries(s.indicators);
+  const prox = computeProximity(s.strategy_name, s.indicators);
 
   return (
     <div className="rounded-lg border border-[var(--border)] overflow-hidden">
@@ -326,6 +439,7 @@ function StrategyCard({ s }: { s: SignalEntry }) {
               ))}
             </div>
           )}
+          {prox && <ProximityMeter prox={prox} />}
         </div>
       )}
     </div>
@@ -397,6 +511,12 @@ export function SignalsPanel({ refreshTrigger }: SignalsPanelProps) {
         {cycles.map(({ symbol, aggregated, strategies, history }) => {
           const open = expanded.has(symbol);
           const coin = symbol.split('/')[0];
+          const proximities = strategies
+            .map((st) => computeProximity(st.strategy_name, st.indicators))
+            .filter((p): p is Proximity => p !== null);
+          const bestProx = proximities.length > 0
+            ? proximities.reduce((a, b) => (a.pct > b.pct ? a : b))
+            : null;
           return (
             <div key={symbol}>
               {/* Summary row */}
@@ -422,7 +542,9 @@ export function SignalsPanel({ refreshTrigger }: SignalsPanelProps) {
                 </div>
 
                 <span className="flex-1 text-xs text-[var(--text-secondary)] truncate hidden md:block">
-                  {moodSummary(aggregated.direction, aggregated.confidence).split('—')[0]}
+                  {aggregated.direction === 'HOLD' && bestProx
+                    ? `Closest: ${bestProx.pct}% to ${bestProx.side}`
+                    : moodSummary(aggregated.direction, aggregated.confidence).split('—')[0]}
                 </span>
 
                 <span className="text-[11px] text-[var(--text-secondary)] tabular-nums shrink-0">
