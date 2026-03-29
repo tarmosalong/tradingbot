@@ -25,13 +25,19 @@ export function TradesTable({ trades }: TradesTableProps) {
           <tbody>
             {trades.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-[var(--text-secondary)]">
-                  No trades yet
+                <td colSpan={6} className="px-4 py-10 text-center">
+                  <p className="text-[var(--text-secondary)] text-sm mb-1">No trades yet</p>
+                  <p className="text-[var(--text-secondary)] text-xs">
+                    The bot is analysing the market. When it finds a strong signal, it will place a trade automatically.
+                  </p>
                 </td>
               </tr>
             ) : (
               trades.map((trade) => (
-                <tr key={trade.id} className="border-t border-[var(--border)] hover:bg-[var(--bg-secondary)]/50">
+                <tr
+                  key={trade.id}
+                  className="border-t border-[var(--border)] hover:bg-[var(--bg-secondary)]/50 transition-colors"
+                >
                   <td className="px-4 py-2 text-[var(--text-secondary)]">
                     {new Date(trade.executed_at).toLocaleString([], {
                       month: 'short',
@@ -49,14 +55,22 @@ export function TradesTable({ trades }: TradesTableProps) {
                           : 'bg-[var(--accent-red)]/20 text-[var(--accent-red)]'
                       }`}
                     >
-                      {trade.side}
+                      {trade.side === 'BUY' ? 'Buy' : 'Sell'}
                     </span>
                   </td>
                   <td className="px-4 py-2 text-right font-mono">{trade.amount.toFixed(6)}</td>
-                  <td className="px-4 py-2 text-right font-mono">${trade.price.toLocaleString()}</td>
+                  <td className="px-4 py-2 text-right font-mono">
+                    ${trade.price.toLocaleString()}
+                  </td>
                   <td className="px-4 py-2 text-right font-mono">
                     {trade.pnl != null ? (
-                      <span className={trade.pnl >= 0 ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'}>
+                      <span
+                        className={
+                          trade.pnl >= 0
+                            ? 'text-[var(--accent-green)]'
+                            : 'text-[var(--accent-red)]'
+                        }
+                      >
                         {trade.pnl >= 0 ? '+' : ''}${trade.pnl.toFixed(2)}
                       </span>
                     ) : (

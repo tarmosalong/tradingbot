@@ -4,7 +4,18 @@ import type { BotConfig, BotStatus, BotRunnerState } from '../api';
 
 const TIMEFRAMES = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '1d'] as const;
 
-/** Matches backend STRATEGY_REGISTRY keys (dashboard patch only persists these). */
+const TIMEFRAME_LABELS: Record<string, string> = {
+  '1m': '1 min', '3m': '3 min', '5m': '5 min',
+  '15m': '15 min', '30m': '30 min', '1h': '1 hour',
+  '2h': '2 hours', '4h': '4 hours', '1d': '1 day',
+};
+
+const STRATEGY_LABELS: Record<string, { label: string; desc: string }> = {
+  rsi: { label: 'Momentum (RSI)', desc: 'Detects overbought/oversold conditions' },
+  macd: { label: 'Trend (MACD)', desc: 'Spots trend changes and momentum shifts' },
+  bollinger: { label: 'Volatility (Bollinger)', desc: 'Checks if price is unusually high or low' },
+};
+
 const BUILDABLE_STRATEGIES = ['rsi', 'macd', 'bollinger'] as const;
 
 interface PaperTradingPanelProps {
@@ -153,16 +164,20 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
   return (
     <div className="bg-[var(--bg-card)] rounded-lg border border-[var(--border)] mb-4 overflow-hidden">
       <div className="px-4 py-3 border-b border-[var(--border)] flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-sm font-medium text-[var(--text-secondary)]">Paper trading (in-process)</h2>
+        <div>
+          <h2 className="text-sm font-medium">Paper Trading</h2>
+          <p className="text-[11px] text-[var(--text-secondary)]">Simulated trading — no real money is used</p>
+        </div>
         <div className="flex items-center gap-2">
           <span
-            className={`text-xs font-medium px-2 py-0.5 rounded ${
+            className={`text-xs font-medium px-2 py-0.5 rounded flex items-center gap-1.5 ${
               running
                 ? 'bg-[var(--accent-green)]/15 text-[var(--accent-green)]'
                 : 'bg-[var(--bg-secondary)] text-[var(--text-secondary)]'
             }`}
           >
-            {state ?? '…'}
+            {running && <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-green)] animate-pulse" />}
+            {state === 'running' ? 'Analysing...' : state === 'starting' ? 'Starting...' : state === 'stopped' ? 'Stopped' : state ?? '…'}
           </span>
           <button
             type="button"
@@ -204,14 +219,14 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
           <p className={`text-xs ${msg.includes('saved') ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'}`}>{msg}</p>
         )}
 
-        <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-          Start/stop runs the strategy loop inside the API server. Save writes{' '}
-          <code className="text-[var(--text-primary)] bg-[var(--bg-secondary)] px-1 rounded text-[11px]">config.yaml</code> — stop the bot
-          first. Changing starting balance applies on the next run (not to an already-running simulated book).
+        <p className="text-xs text-[var(--text-secondary)] leading-relaxed bg-[var(--accent-blue)]/5 border border-[var(--accent-blue)]/20 rounded-lg px-3 py-2">
+          <strong className="text-[var(--text-primary)]">How it works:</strong> Press Start to begin simulated trading.
+          The bot will analyse the market using your chosen strategies and make virtual trades.
+          Settings can only be changed when the bot is stopped.
         </p>
 
         <label className="block space-y-1">
-          <span className="text-xs text-[var(--text-secondary)]">Starting balance (USDT)</span>
+          <span className="text-xs text-[var(--text-secondary)]">Starting balance (virtual USDT)</span>
           <input
             type="number"
             min={100}
@@ -221,10 +236,11 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
             disabled={!stopped || botApiUnavailable}
             className="w-full rounded-md border border-[var(--border)] bg-[var(--bg-secondary)] px-3 py-2 text-sm disabled:opacity-50"
           />
+          <span className="text-[10px] text-[var(--text-secondary)]">The fake money amount you start with</span>
         </label>
 
         <label className="block space-y-1">
-          <span className="text-xs text-[var(--text-secondary)]">Pairs (comma-separated)</span>
+          <span className="text-xs text-[var(--text-secondary)]">Trading pairs</span>
           <input
             type="text"
             value={pairs}
@@ -233,11 +249,12 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
             placeholder="BTC/USDT, ETH/USDT"
             className="w-full rounded-md border border-[var(--border)] bg-[var(--bg-secondary)] px-3 py-2 text-sm disabled:opacity-50"
           />
+          <span className="text-[10px] text-[var(--text-secondary)]">Which coins to trade, e.g. BTC/USDT, ETH/USDT</span>
         </label>
 
         <div className="grid grid-cols-2 gap-3">
           <label className="block space-y-1">
-            <span className="text-xs text-[var(--text-secondary)]">Timeframe</span>
+            <span className="text-xs text-[var(--text-secondary)]">Chart timeframe</span>
             <select
               value={timeframe}
               onChange={(e) => setTimeframe(e.target.value)}
@@ -246,13 +263,14 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
             >
               {TIMEFRAMES.map((tf) => (
                 <option key={tf} value={tf}>
-                  {tf}
+                  {TIMEFRAME_LABELS[tf] ?? tf}
                 </option>
               ))}
             </select>
+            <span className="text-[10px] text-[var(--text-secondary)]">Candle period for analysis</span>
           </label>
           <label className="block space-y-1">
-            <span className="text-xs text-[var(--text-secondary)]">Poll interval (s)</span>
+            <span className="text-xs text-[var(--text-secondary)]">Check every (seconds)</span>
             <input
               type="number"
               min={10}
@@ -262,24 +280,31 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
               disabled={!stopped || botApiUnavailable}
               className="w-full rounded-md border border-[var(--border)] bg-[var(--bg-secondary)] px-3 py-2 text-sm disabled:opacity-50"
             />
+            <span className="text-[10px] text-[var(--text-secondary)]">How often the bot analyses the market</span>
           </label>
         </div>
 
         <div>
-          <span className="text-xs text-[var(--text-secondary)] block mb-2">Strategies (technical only)</span>
-          <div className="flex flex-wrap gap-3">
-            {BUILDABLE_STRATEGIES.map((key) => (
-              <label key={key} className="flex items-center gap-2 text-sm cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={selected.has(key)}
-                  onChange={() => toggleStrategy(key)}
-                  disabled={!stopped || botApiUnavailable}
-                  className="rounded border-[var(--border)]"
-                />
-                <span className="uppercase text-xs tracking-wide">{key}</span>
-              </label>
-            ))}
+          <span className="text-xs text-[var(--text-secondary)] block mb-2">Analysis strategies</span>
+          <div className="space-y-2">
+            {BUILDABLE_STRATEGIES.map((key) => {
+              const info = STRATEGY_LABELS[key];
+              return (
+                <label key={key} className="flex items-start gap-2 text-sm cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selected.has(key)}
+                    onChange={() => toggleStrategy(key)}
+                    disabled={!stopped || botApiUnavailable}
+                    className="rounded border-[var(--border)] mt-0.5"
+                  />
+                  <div>
+                    <span className="text-xs font-medium">{info?.label ?? key.toUpperCase()}</span>
+                    {info && <p className="text-[10px] text-[var(--text-secondary)] leading-tight">{info.desc}</p>}
+                  </div>
+                </label>
+              );
+            })}
           </div>
         </div>
 
@@ -287,9 +312,9 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
           type="button"
           onClick={() => void handleSave()}
           disabled={busy || !stopped || botApiUnavailable}
-          className="w-full py-2 rounded-md border border-[var(--border)] bg-[var(--bg-secondary)] text-sm font-medium hover:bg-[var(--border)]/40 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+          className="w-full py-2.5 rounded-md border border-[var(--accent-blue)]/40 bg-[var(--accent-blue)]/10 text-sm font-medium text-[var(--accent-blue)] hover:bg-[var(--accent-blue)]/20 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed transition-colors"
         >
-          Save settings to config.yaml
+          Save Settings
         </button>
       </div>
     </div>
