@@ -5,7 +5,6 @@ import { useWebSocket } from './hooks/useWebSocket';
 import { Header } from './components/Header';
 import { StatsPanel } from './components/StatsPanel';
 import { PortfolioChart } from './components/PortfolioChart';
-import { TradesTable } from './components/TradesTable';
 import { ConfigPanel } from './components/ConfigPanel';
 import { PaperTradingPanel } from './components/PaperTradingPanel';
 import { SignalsPanel } from './components/SignalsPanel';
@@ -80,7 +79,7 @@ function App() {
             {config?.mode === 'paper' && (
               <PaperTradingPanel config={config} onConfigRefresh={fetchData} />
             )}
-            <PositionsPanel refreshTrigger={signalTrigger} />
+            <PositionsPanel trades={trades} refreshTrigger={signalTrigger} />
             <SignalsPanel refreshTrigger={signalTrigger} />
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-2">
@@ -90,7 +89,6 @@ function App() {
                 <ConfigPanel config={config} />
               </div>
             </div>
-            <TradesTable trades={trades} />
           </>
         )}
 

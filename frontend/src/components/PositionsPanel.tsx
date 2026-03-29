@@ -1,15 +1,17 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api';
-import type { OpenPosition, ExitRule } from '../api';
+import type { Trade, OpenPosition, ExitRule } from '../api';
 
 interface PositionsPanelProps {
+  trades: Trade[];
   refreshTrigger?: unknown;
 }
 
-export function PositionsPanel({ refreshTrigger }: PositionsPanelProps) {
+export function PositionsPanel({ trades, refreshTrigger }: PositionsPanelProps) {
   const [positions, setPositions] = useState<OpenPosition[]>([]);
   const [exitRules, setExitRules] = useState<ExitRule[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showAllTrades, setShowAllTrades] = useState(false);
 
   const fetchPositions = useCallback(async () => {
     try {
@@ -33,38 +35,136 @@ export function PositionsPanel({ refreshTrigger }: PositionsPanelProps) {
     fetchPositions();
   }, [refreshTrigger, fetchPositions]);
 
+  const visibleTrades = showAllTrades ? trades : trades.slice(0, 10);
+  const hasPositions = positions.length > 0;
+  const hasTrades = trades.length > 0;
+
   return (
     <div className="bg-[var(--bg-card)]/80 backdrop-blur-sm rounded-xl border border-[var(--border)] overflow-hidden">
+      {/* Header */}
       <div className="px-4 py-3 border-b border-[var(--border)] flex items-center justify-between">
         <div>
-          <h2 className="text-sm font-medium text-[var(--text-primary)]">Open Positions</h2>
+          <h2 className="text-sm font-medium text-[var(--text-primary)]">Trading Activity</h2>
           <p className="text-xs text-[var(--text-secondary)] mt-0.5">
-            Holdings the bot has bought and hasn't sold yet
+            Open positions and trade history
           </p>
         </div>
-        {positions.length > 0 && (
-          <span className="text-xs px-2 py-0.5 rounded-full bg-[var(--accent-green)]/15 text-[var(--accent-green)] font-medium">
-            {positions.length} active
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          {hasPositions && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-[var(--accent-green)]/15 text-[var(--accent-green)] font-medium">
+              {positions.length} open
+            </span>
+          )}
+          {hasTrades && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-[var(--bg-secondary)] text-[var(--text-secondary)] font-medium">
+              {trades.length} trades
+            </span>
+          )}
+        </div>
       </div>
 
       {loading ? (
         <div className="px-4 py-8 text-center text-sm text-[var(--text-secondary)]">Loading...</div>
-      ) : positions.length === 0 ? (
-        <div className="px-4 py-6">
-          <p className="text-center text-sm text-[var(--text-secondary)] mb-4">No open positions</p>
-          <ExitRulesBox rules={exitRules} />
-        </div>
       ) : (
-        <div className="divide-y divide-[var(--border)]">
-          {positions.map((pos) => (
-            <PositionRow key={pos.symbol} position={pos} />
-          ))}
-          <div className="px-4 py-3">
-            <ExitRulesBox rules={exitRules} />
+        <>
+          {/* Open positions */}
+          {hasPositions && (
+            <div className="divide-y divide-[var(--border)]">
+              {positions.map((pos) => (
+                <PositionRow key={pos.symbol} position={pos} />
+              ))}
+            </div>
+          )}
+
+          {/* Exit rules */}
+          {exitRules.length > 0 && (
+            <div className="px-4 py-3 border-t border-[var(--border)]">
+              <ExitRulesBox rules={exitRules} />
+            </div>
+          )}
+
+          {/* Trade history */}
+          <div className="border-t border-[var(--border)]">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-[var(--text-secondary)] text-xs uppercase tracking-wider">
+                    <th className="px-4 py-2.5">Time</th>
+                    <th className="px-4 py-2.5">Symbol</th>
+                    <th className="px-4 py-2.5">Side</th>
+                    <th className="px-4 py-2.5 text-right">Amount</th>
+                    <th className="px-4 py-2.5 text-right">Price</th>
+                    <th className="px-4 py-2.5 text-right">P&L</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {!hasTrades ? (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-8 text-center">
+                        <p className="text-[var(--text-secondary)] text-sm mb-1">No trades yet</p>
+                        <p className="text-[var(--text-secondary)] text-xs">
+                          The bot is analysing the market. When it finds a strong signal, it will place a trade automatically.
+                        </p>
+                      </td>
+                    </tr>
+                  ) : (
+                    visibleTrades.map((trade) => (
+                      <tr
+                        key={trade.id}
+                        className="border-t border-[var(--border)] hover:bg-[var(--bg-secondary)]/50 transition-colors"
+                      >
+                        <td className="px-4 py-2 text-[var(--text-secondary)]">
+                          {new Date(trade.executed_at).toLocaleString([], {
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </td>
+                        <td className="px-4 py-2 font-medium">{trade.symbol}</td>
+                        <td className="px-4 py-2">
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-xs font-medium ${
+                              trade.side === 'BUY'
+                                ? 'bg-[var(--accent-green)]/20 text-[var(--accent-green)]'
+                                : 'bg-[var(--accent-red)]/20 text-[var(--accent-red)]'
+                            }`}
+                          >
+                            {trade.side === 'BUY' ? 'Buy' : 'Sell'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2 text-right font-mono">{trade.amount.toFixed(6)}</td>
+                        <td className="px-4 py-2 text-right font-mono">
+                          ${trade.price.toLocaleString()}
+                        </td>
+                        <td className="px-4 py-2 text-right font-mono">
+                          {trade.pnl != null ? (
+                            <span className={trade.pnl >= 0 ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'}>
+                              {trade.pnl >= 0 ? '+' : ''}${trade.pnl.toFixed(2)}
+                            </span>
+                          ) : (
+                            <span className="text-[var(--text-secondary)]">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+            {trades.length > 10 && (
+              <div className="px-4 py-2 border-t border-[var(--border)]">
+                <button
+                  type="button"
+                  onClick={() => setShowAllTrades((p) => !p)}
+                  className="text-xs text-[var(--accent)] hover:underline cursor-pointer"
+                >
+                  {showAllTrades ? `Show less` : `Show all ${trades.length} trades`}
+                </button>
+              </div>
+            )}
           </div>
-        </div>
+        </>
       )}
     </div>
   );
@@ -105,32 +205,31 @@ function PositionRow({ position: pos }: { position: OpenPosition }) {
         <p className="text-xs font-medium text-[var(--text-secondary)] uppercase tracking-wider">
           Exit conditions
         </p>
-
         <ExitCondition
-          icon="🛑"
+          icon={'\u{1F6D1}'}
           label="Stop-loss"
           price={pos.stop_loss_price}
           distance={priceDropToSl}
           description={`Sells if price drops to $${pos.stop_loss_price.toLocaleString(undefined, { minimumFractionDigits: 2 })} (${priceDropToSl.toFixed(1)}% below current)`}
         />
         <ExitCondition
-          icon="📉"
+          icon={'\u{1F4C9}'}
           label="Trailing stop"
           price={pos.trailing_stop_price}
           distance={priceDropToTs}
           description={`Sells if price drops to $${pos.trailing_stop_price.toLocaleString(undefined, { minimumFractionDigits: 2 })} (${priceDropToTs.toFixed(1)}% below current, tracks peak $${pos.peak_price.toLocaleString(undefined, { minimumFractionDigits: 2 })})`}
         />
         <ExitCondition
-          icon="📊"
+          icon={'\u{1F4CA}'}
           label="Strategy signal"
-          description="Sells when RSI ≥ 70 (overbought), bearish MACD crossover, or price above Bollinger upper band"
+          description="Sells when RSI \u2265 70 (overbought), bearish MACD crossover, or price above Bollinger upper band"
         />
       </div>
 
       {nearestExit < 3 && (
         <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--accent-red)]/10 border border-[var(--accent-red)]/20">
           <span className="text-xs text-[var(--accent-red)]">
-            ⚠ Price is {nearestExit.toFixed(1)}% from nearest exit trigger
+            {'\u26A0'} Price is {nearestExit.toFixed(1)}% from nearest exit trigger
           </span>
         </div>
       )}
@@ -196,7 +295,7 @@ function ExitRulesBox({ rules }: { rules: ExitRule[] }) {
           <span className={`w-1.5 h-1.5 rounded-full ${rule.active ? 'bg-[var(--accent-green)]' : 'bg-[var(--text-secondary)]/30'}`} />
           <span className="text-[var(--text-secondary)]">
             <span className="text-[var(--text-primary)] font-medium">{rule.name}</span>
-            {' — '}
+            {' \u2014 '}
             {rule.description}
           </span>
         </div>
