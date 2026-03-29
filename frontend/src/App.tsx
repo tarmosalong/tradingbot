@@ -60,7 +60,9 @@ function App() {
   const signalTrigger = lastMessage?.type === 'signal' ? lastMessage : null;
 
   const initialBalance = config?.paper_trading?.initial_balance_usdt ?? 10_000;
-  const currentValue = portfolio.length > 0 ? portfolio[0].total_value_usdt : null;
+  const unrealizedPnl = positions.reduce((sum, p) => sum + p.pnl, 0);
+  const realizedPnl = trades.reduce((sum, t) => sum + (t.pnl ?? 0), 0);
+  const currentValue = initialBalance + unrealizedPnl + realizedPnl;
 
   return (
     <div className="min-h-screen flex flex-col bg-[var(--bg-primary)]">
