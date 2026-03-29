@@ -1,0 +1,53 @@
+---
+description: Scenario tests required for every engine/strategy/guard change
+alwaysApply: true
+---
+
+# Scenario Test Requirement
+
+## Rule
+
+Every change to the trading engine, strategies, guards, or exit logic **MUST** include at least one end-to-end scenario test in `tests/core/test_engine_scenarios.py`.
+
+Scenario tests simulate a full multi-tick trading cycle with realistic OHLCV data and a mock exchange — they are **not** unit tests. Each test drives the engine through BUY → price movement → exit and verifies the complete chain.
+
+## When to Add a Scenario Test
+
+| Change type | Required scenario |
+|---|---|
+| New guard / filter | Signal blocked when guard condition fails; signal passes when condition met |
+| New exit condition (stop, TP, trailing) | BUY → price triggers exit → position closed, trade in DB |
+| Modified signal aggregation | Multi-strategy tick produces the correct aggregated direction |
+| New risk limit (drawdown, daily loss) | Tick with breached limit → no order placed |
+| Bug fix in engine | Scenario that reproduces the bug's full tick sequence |
+
+## Structure
+
+```python
+class TestMyNewFeatureScenario:
+    """BUY → <price movement> → <expected exit>."""
+
+    async def test_scenario_name(self, db):
+        # 1. Build settings with _scenario_settings(**overrides)
+        s = _scenario_settings(my_new_param=value)
+
+        # 2. Configure mock exchange (OHLCV, balance, ticker, order)
+        exchange = AsyncMock()
+        ohlcv = _ohlcv_with_trend(60)
+        ...
+
+        # 3. Create engine and run tick(s)
+        engine = TradingEngine(...)
+        await engine._tick()
+
+        # 4. Assert position state, order calls, DB records
+        assert "BTC/USDT" in engine._positions
+```
+
+## Checklist
+
+- [ ] Uses `_scenario_settings()` with only the relevant overrides
+- [ ] Mock balance is consistent before and after trades (no drawdown false positives)
+- [ ] Verifies position state (`engine._positions`), order calls, and DB records
+- [ ] Tests both the "blocked" and "allowed" path of the feature
+- [ ] Price levels are calculated from ATR/SL/TP/TS values, not hardcoded magic numbers
