@@ -726,29 +726,55 @@ The live/paper trading engine applies the following guards on every tick:
 | **Duplicate BUY block** | — | Skips BUY if already holding a position for that symbol |
 | **Trade cooldown** | `poll_interval_seconds × 3` | Prevents rapid-fire BUYs on the same symbol |
 
-### Risk Controls in Backtest
+### Risk Controls in Backtest (Full Parity with Live Engine)
+
+The backtest engine now mirrors every guard and exit condition from the live engine:
+
+| Guard / Feature | Backtest Implementation |
+|----------------|------------------------|
+| **ATR-based stops** | `RiskManager.calculate_atr()` → stop-loss at `entry - ATR × atr_stop_multiplier` |
+| **ATR trailing stop** | `peak - ATR × atr_trailing_multiplier`, updates with new highs |
+| **ATR take-profit** | `entry + ATR × atr_tp_multiplier` |
+| **Partial take-profit** | Sells `partial_tp_ratio` at ATR TP, moves stop to breakeven |
+| **ATR position sizing** | `risk_per_trade_pct × portfolio / (ATR × stop_mult)` caps budget |
+| **Volume confirmation** | Same `_check_volume_confirmation()` as live engine |
+| **EMA trend filter** | Same `_check_ema_trend()` as live engine |
+| **Min confidence** | Max of `EngineConfig.min_confidence` and `RiskConfig.min_confidence` |
+| **Cooldown** | Candle-based cooldown between trades |
+| **Duplicate BUY block** | No second BUY while position is open |
+| **Drawdown halt** | Peak-to-trough drawdown circuit breaker (permanent) |
+| **Daily loss limit** | Tracks daily P&L with calendar-day reset |
+| **Strategy weighting** | `strategy_weights` dict passed to `_aggregate_signals()` |
+| **Percentage fallback** | Falls back to `stop_loss_pct`/`trailing_stop_pct` when ATR is zero |
 
 ```mermaid
 graph TD
-    SIGNAL["Aggregated<br/>signal"] --> CONF{"Confidence<br/>>= min?"}
+    SIGNAL["Aggregated<br/>signal (weighted)"] --> CONF{"Confidence<br/>>= min?"}
     CONF -->|No| SKIP1["Skip: too weak"]
-    CONF -->|Yes| CD{"Cooldown<br/>passed?"}
-    CD -->|No| SKIP2["Skip: cooldown"]
-    CD -->|Yes| SIZE["Compute size<br/>max_position_pct<br/>× confidence (dynamic)"]
-    SIZE --> CAP["Cap: max_single_order_usdt"]
-    CAP --> EXEC["Create Order<br/>+ fee + slippage"]
-    EXEC --> POS["Position tracked"]
+    CONF -->|Yes| DUP{"Already<br/>holding?"}
+    DUP -->|BUY + position| SKIP_DUP["Skip: duplicate"]
+    DUP -->|OK| VOL{"Volume<br/>confirmed?"}
+    VOL -->|No| SKIP_VOL["Skip: low volume"]
+    VOL -->|Yes| EMA{"EMA trend<br/>aligned?"}
+    EMA -->|No| SKIP_EMA["Skip: wrong trend"]
+    EMA -->|Yes| CD{"Cooldown<br/>passed?"}
+    CD -->|No| SKIP_CD["Skip: cooldown"]
+    CD -->|Yes| SIZE["ATR position sizing<br/>+ max_position_pct<br/>+ max_single_order_usdt"]
+    SIZE --> EXEC["Create Order<br/>+ fee + slippage"]
+    EXEC --> POS["Position with ATR stops"]
 
-    POS --> |"Every candle"| SL{"low ≤ entry<br/>× (1 - stop_loss)?"}
+    POS --> |"Every candle"| PTP{"high ≥ ATR TP?<br/>(partial exits=0)"}
+    PTP -->|Yes| EXIT_PTP["Partial SELL<br/>+ breakeven stop"]
+    PTP -->|No| SL{"low ≤ ATR SL?"}
     SL -->|Yes| EXIT_SL["Force SELL<br/>stop-loss"]
-    SL -->|No| TS{"low ≤ peak<br/>× (1 - trailing_stop)?"}
+    SL -->|No| TS{"low ≤ ATR trailing?<br/>(peak - ATR × mult)"}
     TS -->|Yes| EXIT_TS["Force SELL<br/>trailing stop"]
-    TS -->|No| TP{"high ≥ entry<br/>× (1 + take_profit)?"}
-    TP -->|Yes| EXIT_TP["Partial SELL<br/>take-profit"]
-    TP -->|No| CONT["Continue"]
+    TS -->|No| CONT["Continue"]
 
     DD{"Portfolio drawdown<br/>> max_drawdown?"}
-    DD -->|Yes| HALT["CIRCUIT BREAKER<br/>Trading halted"]
+    DD -->|Yes| HALT["HALT: permanent"]
+    DL{"Daily loss<br/>> daily_limit?"}
+    DL -->|Yes| SKIP_DAY["Skip: daily limit"]
 ```
 
 ---
@@ -835,6 +861,7 @@ If the dashboard shows **Not Found** for bot actions, the API process is missing
   "end": "2025-06-30",
   "balance": 10000.0,
   "strategies": ["rsi", "macd", "bollinger"],
+  "strategy_weights": { "rsi": 1.0, "macd": 1.5, "bollinger": 0.8 },
   "rsi": { "period": 14, "oversold": 30, "overbought": 70 },
   "macd": { "fast": 12, "slow": 26, "signal": 9 },
   "bollinger": { "period": 20, "std_dev": 2.0 },
@@ -842,7 +869,18 @@ If the dashboard shows **Not Found** for bot actions, the API process is missing
     "max_position_pct": 0.10,
     "stop_loss_pct": 0.03,
     "trailing_stop_pct": 0.02,
-    "max_single_order_usdt": 1000.0
+    "max_single_order_usdt": 1000.0,
+    "max_drawdown_pct": 0.15,
+    "daily_loss_limit_pct": 0.05,
+    "min_confidence": 0.4,
+    "atr_stop_multiplier": 2.0,
+    "atr_tp_multiplier": 3.0,
+    "atr_trailing_multiplier": 1.5,
+    "volume_min_multiplier": 1.2,
+    "ema_trend_period": 50,
+    "ema_trend_enabled": true,
+    "risk_per_trade_pct": 0.01,
+    "partial_tp_ratio": 0.5
   },
   "ai_filter": {
     "enabled": false,
@@ -900,10 +938,14 @@ When `walk_forward.enabled` is `true`, the response includes a `walk_forward` ob
       "stop_loss_exits": 3,
       "trailing_stop_exits": 2,
       "take_profit_exits": 1,
+      "partial_tp_exits": 1,
       "drawdown_halt_candle": null,
+      "daily_loss_skips": 0,
       "signals_below_confidence": 5,
       "cooldown_skips": 8,
       "regime_filtered": 120,
+      "volume_filtered": 15,
+      "ema_filtered": 8,
       "total_fees": 23.45,
       "total_slippage": 11.22
     }
@@ -1063,15 +1105,17 @@ ruff check backend/ tests/
 | `tests/backtest/test_ai_filter.py` | 11 | Crash detection, recovery, strength, stats |
 | `tests/backtest/test_engine.py` | 4 | Base engine execution, trending data, equity curve |
 | `tests/backtest/test_engine_advanced.py` | 10 | Fees, slippage, stop-loss, trailing, cooldown, drawdown, dynamic sizing |
+| `tests/backtest/test_engine_parity.py` | 27 | ATR stops/TP/trailing, volume filter, EMA filter, confidence, cooldown, drawdown halt, daily loss limit, ATR sizing, strategy weights, partial TP, percentage fallback, regime filter, multi-day reset, full cycle |
 | `tests/backtest/test_exchange.py` | 12 | Exchange balances, orders, insufficient funds |
 | `tests/backtest/test_data_loader.py` | 3 | CSV round-trip, timezone handling |
 | `tests/backtest/test_report.py` | 12 | Drawdown, returns, Sharpe, report generation |
 | `tests/backtest/test_walk_forward.py` | 10 | Fold splitting, rolling/expanding, OOS aggregation |
-| **Total `tests/backtest/`** | **62** | (all backtest-related modules) |
+| **Total `tests/backtest/`** | **89** | (all backtest-related modules) |
 | `tests/notifications/test_telegram.py` | 11 | Telegram API payload, disabled path, session lifecycle |
 | `tests/ai/test_openai_client.py` | 5 | OpenAI JSON parsing, LLMProvider |
 | `tests/ai/test_veto_system.py` | 9 | Quorum, failures, timeouts |
 | `tests/test_database.py` | 11 | Trades, orders, portfolio snapshots, signal log insert/query/filters |
 | `tests/core/test_engine.py` | 28+ | Signal aggregation, tick execution, ATR stops, volume filter, EMA trend, strategy weights, partial TP |
+| `tests/core/test_engine_scenarios.py` | 63 | End-to-end scenarios: slippage, whipsaw, flash crash, exchange errors, multi-position, halt persistence |
 | `tests/api/test_routes.py` | 13 | REST endpoints: health, config, trades, orders, portfolio, signals |
-| `tests/` (all) | **272** | Full suite — `pytest tests/ -v` |
+| `tests/` (all) | **362** | Full suite — `pytest tests/ -v` |

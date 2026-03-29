@@ -8,6 +8,16 @@ from backend.config import RiskConfig
 from backend.strategies.technical import RSIStrategy
 
 
+def _no_guard_risk(**overrides) -> RiskConfig:
+    """RiskConfig with guards disabled so basic tests focus on core logic."""
+    defaults = dict(
+        ema_trend_enabled=False,
+        volume_min_multiplier=0.0,
+    )
+    defaults.update(overrides)
+    return RiskConfig(**defaults)
+
+
 def _trending_ohlcv(n: int = 100) -> pd.DataFrame:
     """Generate trending data: down then up to trigger RSI signals."""
     closes = []
@@ -50,6 +60,7 @@ class TestBacktestEngine:
             exchange=exchange,
             strategies=[strategy],
             symbol="BTC/USDT",
+            risk_config=_no_guard_risk(),
         )
         result = await engine.run()
 
@@ -69,6 +80,7 @@ class TestBacktestEngine:
             exchange=exchange,
             strategies=[strategy],
             symbol="BTC/USDT",
+            risk_config=_no_guard_risk(),
         )
         result = await engine.run()
 
@@ -84,6 +96,7 @@ class TestBacktestEngine:
             exchange=exchange,
             strategies=[strategy],
             symbol="BTC/USDT",
+            risk_config=_no_guard_risk(),
         )
         result = await engine.run()
 
@@ -94,7 +107,7 @@ class TestBacktestEngine:
         exchange = BacktestExchange(
             ohlcv, initial_balance_usdt=10000.0,
         )
-        risk = RiskConfig(
+        risk = _no_guard_risk(
             max_position_pct=0.05,
             max_single_order_usdt=500.0,
         )

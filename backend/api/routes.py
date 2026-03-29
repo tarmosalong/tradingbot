@@ -152,6 +152,17 @@ class RiskParams(BaseModel):
     stop_loss_pct: float = 0.03
     trailing_stop_pct: float = 0.02
     max_single_order_usdt: float = 1000.0
+    max_drawdown_pct: float = 0.15
+    daily_loss_limit_pct: float = 0.05
+    min_confidence: float = 0.4
+    atr_stop_multiplier: float = 2.0
+    atr_tp_multiplier: float = 3.0
+    atr_trailing_multiplier: float = 1.5
+    volume_min_multiplier: float = 1.2
+    ema_trend_period: int = 50
+    ema_trend_enabled: bool = True
+    risk_per_trade_pct: float = 0.01
+    partial_tp_ratio: float = 0.5
 
 
 class AIFilterParams(BaseModel):
@@ -190,6 +201,7 @@ class BacktestRequest(BaseModel):
     end: str = "2025-12-31"
     balance: float = 10000.0
     strategies: list[str] = ["rsi", "macd", "bollinger"]
+    strategy_weights: dict[str, float] = {}
     rsi: RSIParams = RSIParams()
     macd: MACDParams = MACDParams()
     bollinger: BollingerParams = BollingerParams()
@@ -271,6 +283,17 @@ async def run_backtest(req: BacktestRequest):
         stop_loss_pct=req.risk.stop_loss_pct,
         trailing_stop_pct=req.risk.trailing_stop_pct,
         max_single_order_usdt=req.risk.max_single_order_usdt,
+        max_drawdown_pct=req.risk.max_drawdown_pct,
+        daily_loss_limit_pct=req.risk.daily_loss_limit_pct,
+        min_confidence=req.risk.min_confidence,
+        atr_stop_multiplier=req.risk.atr_stop_multiplier,
+        atr_tp_multiplier=req.risk.atr_tp_multiplier,
+        atr_trailing_multiplier=req.risk.atr_trailing_multiplier,
+        volume_min_multiplier=req.risk.volume_min_multiplier,
+        ema_trend_period=req.risk.ema_trend_period,
+        ema_trend_enabled=req.risk.ema_trend_enabled,
+        risk_per_trade_pct=req.risk.risk_per_trade_pct,
+        partial_tp_ratio=req.risk.partial_tp_ratio,
     )
 
     from backend.backtest.ai_filter import AIFilterConfig
@@ -304,6 +327,7 @@ async def run_backtest(req: BacktestRequest):
         risk_config=risk_config,
         ai_filter_config=ai_config,
         engine_config=engine_cfg,
+        strategy_weights=req.strategy_weights or None,
     )
 
     result = await engine.run()
@@ -361,6 +385,7 @@ async def run_backtest(req: BacktestRequest):
             wf_config=wf_config,
             fee_rate=req.engine.fee_rate,
             slippage_rate=req.engine.slippage_rate,
+            strategy_weights=req.strategy_weights or None,
         )
         response["walk_forward"] = wf_result.to_dict()
 

@@ -117,6 +117,7 @@ async def run_backtest(args: argparse.Namespace) -> None:
         strategies=strategies,
         symbol=args.symbol,
         risk_config=settings.risk,
+        strategy_weights=settings.strategies.weights or None,
     )
 
     result = await engine.run()

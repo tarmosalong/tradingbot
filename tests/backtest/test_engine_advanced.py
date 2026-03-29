@@ -11,6 +11,16 @@ from backend.config import RiskConfig
 from backend.strategies.technical import RSIStrategy
 
 
+def _no_guard_risk(**overrides) -> RiskConfig:
+    """RiskConfig with guards disabled so existing tests keep focus."""
+    defaults = dict(
+        ema_trend_enabled=False,
+        volume_min_multiplier=0.0,
+    )
+    defaults.update(overrides)
+    return RiskConfig(**defaults)
+
+
 def _trending_up_ohlcv(n: int = 100) -> pd.DataFrame:
     rows = []
     base = 100.0
@@ -74,7 +84,7 @@ class TestFeesAndSlippage:
     async def test_fees_reduce_balance(self):
         ohlcv = _crash_then_recover(150)
         ex = BacktestExchange(ohlcv=ohlcv, fee_rate=0.001, slippage_rate=0.0)
-        risk = RiskConfig(max_position_pct=0.5, stop_loss_pct=0.0, trailing_stop_pct=0.0)
+        risk = _no_guard_risk(max_position_pct=0.5, stop_loss_pct=0.0, trailing_stop_pct=0.0)
         engine = BacktestEngine(
             exchange=ex, strategies=[RSIStrategy()], symbol="BTC/USDT",
             risk_config=risk,
@@ -90,6 +100,7 @@ class TestFeesAndSlippage:
         ex = BacktestExchange(ohlcv=ohlcv, fee_rate=0.0, slippage_rate=0.001)
         engine = BacktestEngine(
             exchange=ex, strategies=[RSIStrategy()], symbol="BTC/USDT",
+            risk_config=_no_guard_risk(),
         )
         result = await engine.run()
         if len(result.trades) > 0:
@@ -101,6 +112,7 @@ class TestFeesAndSlippage:
         ex = BacktestExchange(ohlcv=ohlcv, fee_rate=0.0, slippage_rate=0.0)
         engine = BacktestEngine(
             exchange=ex, strategies=[RSIStrategy()], symbol="BTC/USDT",
+            risk_config=_no_guard_risk(),
         )
         await engine.run()
         assert ex.total_fees_paid == 0.0
@@ -114,7 +126,7 @@ class TestStopLossAndTrailingStop:
         ex = BacktestExchange(
             ohlcv=ohlcv, fee_rate=0.0, slippage_rate=0.0,
         )
-        risk = RiskConfig(
+        risk = _no_guard_risk(
             max_position_pct=0.5,
             stop_loss_pct=0.05,
             trailing_stop_pct=0.0,
@@ -132,7 +144,7 @@ class TestStopLossAndTrailingStop:
         ex = BacktestExchange(
             ohlcv=ohlcv, fee_rate=0.0, slippage_rate=0.0,
         )
-        risk = RiskConfig(
+        risk = _no_guard_risk(
             max_position_pct=0.5,
             stop_loss_pct=0.20,
             trailing_stop_pct=0.03,
@@ -158,6 +170,7 @@ class TestMinConfidenceAndCooldown:
         engine_no_filter = BacktestEngine(
             exchange=ex_no_filter, strategies=[RSIStrategy()],
             symbol="BTC/USDT",
+            risk_config=_no_guard_risk(min_confidence=0.0),
             engine_config=EngineConfig(min_confidence=0.0),
         )
         result_no = await engine_no_filter.run()
@@ -168,6 +181,7 @@ class TestMinConfidenceAndCooldown:
         engine_filter = BacktestEngine(
             exchange=ex_filter, strategies=[RSIStrategy()],
             symbol="BTC/USDT",
+            risk_config=_no_guard_risk(min_confidence=0.9),
             engine_config=EngineConfig(min_confidence=0.9),
         )
         result_yes = await engine_filter.run()
@@ -183,6 +197,7 @@ class TestMinConfidenceAndCooldown:
         engine_no = BacktestEngine(
             exchange=ex_no, strategies=[RSIStrategy()],
             symbol="BTC/USDT",
+            risk_config=_no_guard_risk(),
             engine_config=EngineConfig(cooldown_candles=0),
         )
         result_no = await engine_no.run()
@@ -193,6 +208,7 @@ class TestMinConfidenceAndCooldown:
         engine_cd = BacktestEngine(
             exchange=ex_cd, strategies=[RSIStrategy()],
             symbol="BTC/USDT",
+            risk_config=_no_guard_risk(),
             engine_config=EngineConfig(cooldown_candles=20),
         )
         result_cd = await engine_cd.run()
@@ -207,11 +223,11 @@ class TestDrawdownBreaker:
         ex = BacktestExchange(
             ohlcv=ohlcv, fee_rate=0.0, slippage_rate=0.0,
         )
-        risk = RiskConfig(
+        risk = _no_guard_risk(
             max_position_pct=0.8,
             stop_loss_pct=0.0,
             trailing_stop_pct=0.0,
-            max_drawdown_pct=0.05,
+            max_drawdown_pct=0.005,
         )
         engine = BacktestEngine(
             exchange=ex, strategies=[RSIStrategy()],
@@ -232,6 +248,7 @@ class TestDynamicSizing:
         engine = BacktestEngine(
             exchange=ex, strategies=[RSIStrategy()],
             symbol="BTC/USDT",
+            risk_config=_no_guard_risk(),
             engine_config=EngineConfig(use_dynamic_sizing=True),
         )
         result = await engine.run()
@@ -245,6 +262,7 @@ class TestEngineStats:
         ex = BacktestExchange(ohlcv=ohlcv)
         engine = BacktestEngine(
             exchange=ex, strategies=[RSIStrategy()], symbol="BTC/USDT",
+            risk_config=_no_guard_risk(),
         )
         result = await engine.run()
         assert "total_fees" in result.engine_stats
