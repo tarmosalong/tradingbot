@@ -129,6 +129,13 @@ class EngineParams(BaseModel):
     take_profit_ratio: float = 0.5
 
 
+class WalkForwardParams(BaseModel):
+    enabled: bool = False
+    n_folds: int = 3
+    train_pct: float = 0.7
+    step_type: str = "rolling"
+
+
 class BacktestRequest(BaseModel):
     symbol: str = "BTC/USDT"
     timeframe: str = "1h"
@@ -142,6 +149,7 @@ class BacktestRequest(BaseModel):
     risk: RiskParams = RiskParams()
     ai_filter: AIFilterParams = AIFilterParams()
     engine: EngineParams = EngineParams()
+    walk_forward: WalkForwardParams = WalkForwardParams()
 
 
 @router.post("/backtest")
@@ -266,7 +274,7 @@ async def run_backtest(req: BacktestRequest):
         for _, row in ohlcv.iterrows()
     ]
 
-    return {
+    response: dict = {
         "report": report.to_dict(),
         "equity_curve": result.equity_curve,
         "timestamps": result.timestamps,
@@ -283,3 +291,30 @@ async def run_backtest(req: BacktestRequest):
             for bt in result.trades
         ],
     }
+
+    if req.walk_forward.enabled:
+        from backend.backtest.walk_forward import (
+            WalkForwardConfig,
+            run_walk_forward,
+        )
+
+        wf_config = WalkForwardConfig(
+            n_folds=req.walk_forward.n_folds,
+            train_pct=req.walk_forward.train_pct,
+            step_type=req.walk_forward.step_type,
+        )
+        wf_result = await run_walk_forward(
+            ohlcv=ohlcv,
+            symbol=req.symbol,
+            balance=req.balance,
+            strategies=strats,
+            risk_config=risk_config,
+            ai_filter_config=ai_config,
+            engine_config=engine_cfg,
+            wf_config=wf_config,
+            fee_rate=req.engine.fee_rate,
+            slippage_rate=req.engine.slippage_rate,
+        )
+        response["walk_forward"] = wf_result.to_dict()
+
+    return response

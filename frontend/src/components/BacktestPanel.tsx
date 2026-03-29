@@ -62,12 +62,36 @@ interface BacktestTrade {
   portfolio_value: number;
 }
 
+interface WalkForwardFold {
+  fold_index: number;
+  train_start: string;
+  train_end: string;
+  test_start: string;
+  test_end: string;
+  train_report: BacktestReport;
+  test_report: BacktestReport;
+}
+
+interface WalkForwardResult {
+  folds: WalkForwardFold[];
+  aggregate_oos: {
+    avg_return_pct: number;
+    avg_sharpe: number;
+    avg_max_drawdown_pct: number;
+    avg_win_rate: number;
+    worst_return_pct: number;
+    best_return_pct: number;
+    n_folds: number;
+  };
+}
+
 interface BacktestResult {
   report: BacktestReport;
   equity_curve: number[];
   timestamps: string[];
   ohlcv: OhlcvCandle[];
   trades: BacktestTrade[];
+  walk_forward?: WalkForwardResult;
 }
 
 const AVAILABLE_STRATEGIES = [
@@ -137,6 +161,11 @@ export function BacktestPanel() {
   const [aiVolMultiplier, setAiVolMultiplier] = useState(2.0);
   const [aiVolSpikeMultiplier, setAiVolSpikeMultiplier] = useState(2.5);
   const [aiRecoveryBoost, setAiRecoveryBoost] = useState(1.3);
+
+  const [wfEnabled, setWfEnabled] = useState(false);
+  const [wfFolds, setWfFolds] = useState(3);
+  const [wfTrainPct, setWfTrainPct] = useState(70);
+  const [wfStepType, setWfStepType] = useState<'rolling' | 'expanding'>('rolling');
 
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<BacktestResult | null>(null);
@@ -212,6 +241,12 @@ export function BacktestPanel() {
             adx_trending_threshold: adxThreshold,
             take_profit_pct: takeProfitPct / 100,
             take_profit_ratio: takeProfitRatio / 100,
+          },
+          walk_forward: {
+            enabled: wfEnabled,
+            n_folds: wfFolds,
+            train_pct: wfTrainPct / 100,
+            step_type: wfStepType,
           },
         }),
       });
@@ -454,6 +489,29 @@ export function BacktestPanel() {
                 <ParamInput label="Take Profit %" value={takeProfitPct} onChange={setTakeProfitPct} min={0} max={50} tooltip="Automatically sell a portion of the position when price rises this much above entry. 0 = disabled. Default: 0%" />
                 {takeProfitPct > 0 && (
                   <ParamInput label="TP Sell Ratio %" value={takeProfitRatio} onChange={setTakeProfitRatio} min={10} max={100} tooltip="What percentage of the position to sell at take-profit. 50 = sell half, 100 = sell all. Default: 50%" />
+                )}
+              </div>
+            </div>
+
+            <div>
+              <h3 className="text-xs font-medium text-[var(--accent-blue)] mb-2">Walk-Forward Validation</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="flex items-center gap-2" title="Split the data into sequential train/test folds to detect overfitting. Shows how the strategy performs on unseen data.">
+                  <input type="checkbox" checked={wfEnabled} onChange={(e) => setWfEnabled(e.target.checked)} className="w-4 h-4 rounded accent-[var(--accent-blue)] cursor-pointer" />
+                  <span className="text-xs text-[var(--text-secondary)] border-b border-dotted border-[var(--text-secondary)]/40 cursor-help">Enable</span>
+                </div>
+                {wfEnabled && (
+                  <>
+                    <ParamInput label="Folds" value={wfFolds} onChange={setWfFolds} min={2} max={10} tooltip="Number of sequential train/test splits. More folds = more robust validation but slower. Default: 3" />
+                    <ParamInput label="Train %" value={wfTrainPct} onChange={setWfTrainPct} min={50} max={90} tooltip="Percentage of each fold used for training. The rest is the out-of-sample test set. Default: 70%" />
+                    <div title="Rolling: each fold is a separate data chunk. Expanding: training window grows with each fold.">
+                      <label className="block text-xs text-[var(--text-secondary)] mb-1 border-b border-dotted border-[var(--text-secondary)]/40 w-fit cursor-help">Step Type</label>
+                      <select value={wfStepType} onChange={(e) => setWfStepType(e.target.value as 'rolling' | 'expanding')} className="w-full bg-[var(--bg-secondary)] border border-[var(--border)] rounded px-2 py-1 text-sm">
+                        <option value="rolling">Rolling</option>
+                        <option value="expanding">Expanding</option>
+                      </select>
+                    </div>
+                  </>
                 )}
               </div>
             </div>
@@ -729,6 +787,81 @@ export function BacktestPanel() {
                   Drawdown circuit breaker triggered at candle #{result.report.engine_stats.drawdown_halt_candle} — trading halted.
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Walk-forward results */}
+          {result.walk_forward && result.walk_forward.folds.length > 0 && (
+            <div className="bg-[var(--bg-card)] rounded-lg p-4 border border-[var(--accent-blue)]/30">
+              <h2 className="text-sm font-medium text-[var(--accent-blue)] mb-3">
+                Walk-Forward Validation ({result.walk_forward.aggregate_oos.n_folds} folds)
+              </h2>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                <StatCard
+                  label="Avg OOS Return"
+                  value={`${result.walk_forward.aggregate_oos.avg_return_pct >= 0 ? '+' : ''}${result.walk_forward.aggregate_oos.avg_return_pct.toFixed(2)}%`}
+                  color={result.walk_forward.aggregate_oos.avg_return_pct >= 0 ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'}
+                  tooltip="Average out-of-sample return across all test folds. This is the most realistic performance estimate."
+                />
+                <StatCard
+                  label="Avg OOS Sharpe"
+                  value={result.walk_forward.aggregate_oos.avg_sharpe.toFixed(3)}
+                  tooltip="Average Sharpe ratio on out-of-sample test data. More reliable than in-sample Sharpe."
+                />
+                <StatCard
+                  label="Avg OOS Drawdown"
+                  value={`${result.walk_forward.aggregate_oos.avg_max_drawdown_pct.toFixed(2)}%`}
+                  color="text-[var(--accent-red)]"
+                  tooltip="Average maximum drawdown on test data across folds."
+                />
+                <StatCard
+                  label="Worst Fold Return"
+                  value={`${result.walk_forward.aggregate_oos.worst_return_pct >= 0 ? '+' : ''}${result.walk_forward.aggregate_oos.worst_return_pct.toFixed(2)}%`}
+                  color={result.walk_forward.aggregate_oos.worst_return_pct >= 0 ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'}
+                  tooltip="Return of the worst-performing test fold. Shows the downside risk of the strategy."
+                />
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-[var(--border)] text-[var(--text-secondary)] text-xs">
+                      <th className="text-left px-3 py-2 font-medium">Fold</th>
+                      <th className="text-left px-3 py-2 font-medium">Period</th>
+                      <th className="text-right px-3 py-2 font-medium">Train Return</th>
+                      <th className="text-right px-3 py-2 font-medium">Test Return</th>
+                      <th className="text-right px-3 py-2 font-medium">Train Sharpe</th>
+                      <th className="text-right px-3 py-2 font-medium">Test Sharpe</th>
+                      <th className="text-right px-3 py-2 font-medium">Test Trades</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {result.walk_forward.folds.map((fold) => {
+                      const testIsUp = fold.test_report.total_return_pct >= 0;
+                      return (
+                        <tr key={fold.fold_index} className="border-b border-[var(--border)]/50 hover:bg-[var(--bg-secondary)]/50">
+                          <td className="px-3 py-2 text-[var(--text-secondary)]">#{fold.fold_index}</td>
+                          <td className="px-3 py-2 text-xs">
+                            {new Date(fold.train_start).toLocaleDateString()} — {new Date(fold.test_end).toLocaleDateString()}
+                          </td>
+                          <td className="px-3 py-2 text-right font-mono">
+                            <span className={fold.train_report.total_return_pct >= 0 ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'}>
+                              {fold.train_report.total_return_pct >= 0 ? '+' : ''}{fold.train_report.total_return_pct.toFixed(2)}%
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-right font-mono font-bold">
+                            <span className={testIsUp ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'}>
+                              {testIsUp ? '+' : ''}{fold.test_report.total_return_pct.toFixed(2)}%
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-right font-mono">{fold.train_report.sharpe_ratio.toFixed(3)}</td>
+                          <td className="px-3 py-2 text-right font-mono font-bold">{fold.test_report.sharpe_ratio.toFixed(3)}</td>
+                          <td className="px-3 py-2 text-right">{fold.test_report.total_trades}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 
