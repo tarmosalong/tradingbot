@@ -117,6 +117,18 @@ class AIFilterParams(BaseModel):
     recovery_boost: float = 1.3
 
 
+class EngineParams(BaseModel):
+    fee_rate: float = 0.001
+    slippage_rate: float = 0.0005
+    min_confidence: float = 0.0
+    cooldown_candles: int = 0
+    use_dynamic_sizing: bool = False
+    enable_regime_filter: bool = False
+    adx_trending_threshold: float = 25.0
+    take_profit_pct: float = 0.0
+    take_profit_ratio: float = 0.5
+
+
 class BacktestRequest(BaseModel):
     symbol: str = "BTC/USDT"
     timeframe: str = "1h"
@@ -129,6 +141,7 @@ class BacktestRequest(BaseModel):
     bollinger: BollingerParams = BollingerParams()
     risk: RiskParams = RiskParams()
     ai_filter: AIFilterParams = AIFilterParams()
+    engine: EngineParams = EngineParams()
 
 
 @router.post("/backtest")
@@ -168,6 +181,8 @@ async def run_backtest(req: BacktestRequest):
         ohlcv=ohlcv,
         initial_balance_usdt=req.balance,
         symbol=req.symbol,
+        fee_rate=req.engine.fee_rate,
+        slippage_rate=req.engine.slippage_rate,
     )
 
     config_map: dict = {
@@ -215,12 +230,25 @@ async def run_backtest(req: BacktestRequest):
         recovery_boost=req.ai_filter.recovery_boost,
     )
 
+    from backend.backtest.engine import EngineConfig
+
+    engine_cfg = EngineConfig(
+        min_confidence=req.engine.min_confidence,
+        cooldown_candles=req.engine.cooldown_candles,
+        use_dynamic_sizing=req.engine.use_dynamic_sizing,
+        enable_regime_filter=req.engine.enable_regime_filter,
+        adx_trending_threshold=req.engine.adx_trending_threshold,
+        take_profit_pct=req.engine.take_profit_pct,
+        take_profit_ratio=req.engine.take_profit_ratio,
+    )
+
     engine = BacktestEngine(
         exchange=exchange,
         strategies=strats,
         symbol=req.symbol,
         risk_config=risk_config,
         ai_filter_config=ai_config,
+        engine_config=engine_cfg,
     )
 
     result = await engine.run()

@@ -21,6 +21,18 @@ interface AIFilterStats {
   recovery_detections: number;
 }
 
+interface EngineStats {
+  stop_loss_exits: number;
+  trailing_stop_exits: number;
+  take_profit_exits: number;
+  drawdown_halt_candle: number | null;
+  signals_below_confidence: number;
+  cooldown_skips: number;
+  regime_filtered: number;
+  total_fees: number;
+  total_slippage: number;
+}
+
 interface BacktestReport {
   initial_value: number;
   final_value: number;
@@ -38,6 +50,7 @@ interface BacktestReport {
   worst_trade_pnl: number;
   strategy_stats?: Record<string, Record<string, number>>;
   ai_filter_stats?: AIFilterStats;
+  engine_stats?: EngineStats;
 }
 
 interface BacktestTrade {
@@ -106,6 +119,16 @@ export function BacktestPanel() {
   const [riskStopLoss, setRiskStopLoss] = useState(3);
   const [riskTrailingStop, setRiskTrailingStop] = useState(2);
   const [riskMaxOrder, setRiskMaxOrder] = useState(1000);
+
+  const [feeRate, setFeeRate] = useState(0.1);
+  const [slippageRate, setSlippageRate] = useState(0.05);
+  const [minConfidence, setMinConfidence] = useState(0);
+  const [cooldownCandles, setCooldownCandles] = useState(0);
+  const [dynamicSizing, setDynamicSizing] = useState(false);
+  const [regimeFilter, setRegimeFilter] = useState(false);
+  const [adxThreshold, setAdxThreshold] = useState(25);
+  const [takeProfitPct, setTakeProfitPct] = useState(0);
+  const [takeProfitRatio, setTakeProfitRatio] = useState(50);
 
   const [aiEnabled, setAiEnabled] = useState(false);
   const [aiStrength, setAiStrength] = useState(0.5);
@@ -178,6 +201,17 @@ export function BacktestPanel() {
             volatility_multiplier: aiVolMultiplier,
             volume_spike_multiplier: aiVolSpikeMultiplier,
             recovery_boost: aiRecoveryBoost,
+          },
+          engine: {
+            fee_rate: feeRate / 100,
+            slippage_rate: slippageRate / 100,
+            min_confidence: minConfidence / 100,
+            cooldown_candles: cooldownCandles,
+            use_dynamic_sizing: dynamicSizing,
+            enable_regime_filter: regimeFilter,
+            adx_trending_threshold: adxThreshold,
+            take_profit_pct: takeProfitPct / 100,
+            take_profit_ratio: takeProfitRatio / 100,
           },
         }),
       });
@@ -392,6 +426,37 @@ export function BacktestPanel() {
                 </div>
               </div>
             )}
+
+            <div>
+              <h3 className="text-xs font-medium text-[var(--accent-yellow,#eab308)] mb-2">Trading Costs (Realism)</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <ParamInput label="Fee Rate %" value={feeRate} onChange={setFeeRate} min={0} max={0.5} step={0.01} tooltip="Exchange fee per trade as percentage. Binance default: 0.1% (maker/taker). Set to 0 for zero-fee simulation. Default: 0.1%" />
+                <ParamInput label="Slippage %" value={slippageRate} onChange={setSlippageRate} min={0} max={0.5} step={0.01} tooltip="Estimated price slippage per trade. BUY price is increased, SELL price decreased by this amount. Real markets: 0.01–0.3%. Default: 0.05%" />
+                <ParamInput label="Min Confidence %" value={minConfidence} onChange={setMinConfidence} min={0} max={90} tooltip="Minimum aggregated signal confidence required to execute a trade. Filters out weak signals. 0 = no filter, 60 = only strong signals. Default: 0" />
+                <ParamInput label="Cooldown (candles)" value={cooldownCandles} onChange={setCooldownCandles} min={0} max={50} tooltip="Minimum number of candles between trades. Prevents rapid-fire trading that racks up fees. 0 = no cooldown. Default: 0" />
+              </div>
+            </div>
+
+            <div>
+              <h3 className="text-xs font-medium text-[var(--accent-yellow,#eab308)] mb-2">Position Management</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="flex items-center gap-2" title="Scale position size by signal confidence. High-confidence signals get larger positions, low-confidence get smaller.">
+                  <input type="checkbox" checked={dynamicSizing} onChange={(e) => setDynamicSizing(e.target.checked)} className="w-4 h-4 rounded accent-[var(--accent-yellow,#eab308)] cursor-pointer" />
+                  <span className="text-xs text-[var(--text-secondary)] border-b border-dotted border-[var(--text-secondary)]/40 cursor-help">Dynamic Sizing</span>
+                </div>
+                <div className="flex items-center gap-2" title="Skip mean-reversion signals (RSI, Bollinger) when ADX indicates a strong trend. Prevents buying dips in a crash or selling rallies in a bull run.">
+                  <input type="checkbox" checked={regimeFilter} onChange={(e) => setRegimeFilter(e.target.checked)} className="w-4 h-4 rounded accent-[var(--accent-yellow,#eab308)] cursor-pointer" />
+                  <span className="text-xs text-[var(--text-secondary)] border-b border-dotted border-[var(--text-secondary)]/40 cursor-help">ADX Regime Filter</span>
+                </div>
+                {regimeFilter && (
+                  <ParamInput label="ADX Threshold" value={adxThreshold} onChange={setAdxThreshold} min={15} max={50} tooltip="ADX value above which the market is considered trending and mean-reversion signals are filtered. 20–25 = moderate trend, 30+ = strong trend. Default: 25" />
+                )}
+                <ParamInput label="Take Profit %" value={takeProfitPct} onChange={setTakeProfitPct} min={0} max={50} tooltip="Automatically sell a portion of the position when price rises this much above entry. 0 = disabled. Default: 0%" />
+                {takeProfitPct > 0 && (
+                  <ParamInput label="TP Sell Ratio %" value={takeProfitRatio} onChange={setTakeProfitRatio} min={10} max={100} tooltip="What percentage of the position to sell at take-profit. 50 = sell half, 100 = sell all. Default: 50%" />
+                )}
+              </div>
+            </div>
 
             <div>
               <h3 className="text-xs font-medium text-[var(--accent-red)] mb-2">Risk Management</h3>
@@ -640,6 +705,30 @@ export function BacktestPanel() {
                   tooltip="Times a price bounce-back was detected after a recent crash (potential buy opportunity)."
                 />
               </div>
+            </div>
+          )}
+
+          {/* Engine stats */}
+          {result.report.engine_stats && (result.report.engine_stats.total_fees > 0 || result.report.engine_stats.stop_loss_exits > 0 || result.report.engine_stats.signals_below_confidence > 0) && (
+            <div className="bg-[var(--bg-card)] rounded-lg p-4 border border-[var(--accent-yellow,#eab308)]/30">
+              <h2 className="text-sm font-medium text-[var(--accent-yellow,#eab308)] mb-3">
+                Execution & Risk Stats
+              </h2>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <AIStatItem label="Total Fees" value={Number(result.report.engine_stats.total_fees.toFixed(2))} color="text-[var(--accent-red)]" tooltip="Total exchange fees paid during the backtest." />
+                <AIStatItem label="Total Slippage" value={Number(result.report.engine_stats.total_slippage.toFixed(2))} color="text-[var(--accent-red)]" tooltip="Total estimated slippage cost during the backtest." />
+                <AIStatItem label="Stop-Loss Exits" value={result.report.engine_stats.stop_loss_exits} tooltip="Positions automatically closed by fixed stop-loss." />
+                <AIStatItem label="Trailing Stop Exits" value={result.report.engine_stats.trailing_stop_exits} tooltip="Positions automatically closed by trailing stop." />
+                <AIStatItem label="Take-Profit Exits" value={result.report.engine_stats.take_profit_exits} color="text-[var(--accent-green)]" tooltip="Positions where profit was automatically taken." />
+                <AIStatItem label="Low Confidence Skips" value={result.report.engine_stats.signals_below_confidence} tooltip="Signals filtered out because confidence was below the minimum threshold." />
+                <AIStatItem label="Cooldown Skips" value={result.report.engine_stats.cooldown_skips} tooltip="Signals skipped because the cooldown period between trades hadn't elapsed." />
+                <AIStatItem label="Regime Filtered" value={result.report.engine_stats.regime_filtered} tooltip="Candles where signals were skipped because ADX indicated a strong trend (mean-reversion unsafe)." />
+              </div>
+              {result.report.engine_stats.drawdown_halt_candle !== null && (
+                <div className="mt-2 text-xs text-[var(--accent-red)] font-medium">
+                  Drawdown circuit breaker triggered at candle #{result.report.engine_stats.drawdown_halt_candle} — trading halted.
+                </div>
+              )}
             </div>
           )}
 

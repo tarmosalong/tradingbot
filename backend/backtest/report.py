@@ -34,6 +34,7 @@ class BacktestReport:
     total_candles: int = 0
     strategy_stats: dict[str, dict[str, int]] = field(default_factory=dict)
     ai_filter_stats: dict[str, int] = field(default_factory=dict)
+    engine_stats: dict[str, object] = field(default_factory=dict)
 
     def print_report(self) -> None:
         lines = [
@@ -87,6 +88,25 @@ class BacktestReport:
             lines.append(f"  Recovery detections: {s.get('recovery_detections', 0)}")
             lines.append("")
 
+        if self.engine_stats:
+            e = self.engine_stats
+            fees = e.get("total_fees", 0)
+            slip = e.get("total_slippage", 0)
+            if fees or slip:
+                lines.append("  --- Trading Costs ---")
+                lines.append(f"  Total Fees:          ${fees:,.2f}")
+                lines.append(f"  Total Slippage:      ${slip:,.2f}")
+                lines.append("")
+            sl = e.get("stop_loss_exits", 0)
+            ts = e.get("trailing_stop_exits", 0)
+            tp = e.get("take_profit_exits", 0)
+            if sl or ts or tp:
+                lines.append("  --- Risk Exits ---")
+                lines.append(f"  Stop-loss exits:     {sl}")
+                lines.append(f"  Trailing stop exits: {ts}")
+                lines.append(f"  Take-profit exits:   {tp}")
+                lines.append("")
+
         lines.append("=" * 60)
         print("\n".join(lines))
 
@@ -109,6 +129,7 @@ class BacktestReport:
             "total_candles": self.total_candles,
             "strategy_stats": self.strategy_stats,
             "ai_filter_stats": self.ai_filter_stats,
+            "engine_stats": self.engine_stats,
         }
 
 
@@ -150,6 +171,7 @@ def generate_report(result: BacktestResult) -> BacktestReport:
 
     report.strategy_stats = _strategy_stats(result)
     report.ai_filter_stats = result.ai_filter_stats
+    report.engine_stats = result.engine_stats
 
     return report
 

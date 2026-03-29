@@ -24,6 +24,8 @@ class BacktestExchange(ExchangeBase):
         ohlcv: pd.DataFrame,
         initial_balance_usdt: float = 10_000.0,
         symbol: str = "BTC/USDT",
+        fee_rate: float = 0.001,
+        slippage_rate: float = 0.0005,
     ) -> None:
         if ohlcv.empty:
             raise ValueError("OHLCV data must not be empty")
@@ -33,6 +35,10 @@ class BacktestExchange(ExchangeBase):
         self._index = 0
         self._balances: dict[str, float] = {"USDT": initial_balance_usdt}
         self._orders: dict[str, Order] = {}
+        self._fee_rate = fee_rate
+        self._slippage_rate = slippage_rate
+        self.total_fees_paid = 0.0
+        self.total_slippage_cost = 0.0
 
     @property
     def current_index(self) -> int:
@@ -86,29 +92,40 @@ class BacktestExchange(ExchangeBase):
         price: float | None = None,
     ) -> Order:
         row = self._current_row()
-        fill_price = price if price and order_type.upper() == "LIMIT" else float(row["close"])
+        mid_price = price if price and order_type.upper() == "LIMIT" else float(row["close"])
+
+        if side.upper() == "BUY":
+            fill_price = mid_price * (1.0 + self._slippage_rate)
+        elif side.upper() == "SELL":
+            fill_price = mid_price * (1.0 - self._slippage_rate)
+        else:
+            raise OrderError(f"Unknown side: {side}")
+
+        slippage_cost = abs(fill_price - mid_price) * amount
+        self.total_slippage_cost += slippage_cost
 
         base, quote = symbol.split("/")
         cost = amount * fill_price
+        fee = cost * self._fee_rate
+        self.total_fees_paid += fee
 
         if side.upper() == "BUY":
+            total_cost = cost + fee
             available = self._balances.get(quote, 0.0)
-            if available < cost:
+            if available < total_cost:
                 raise InsufficientFundsError(
-                    f"Need {cost:.2f} {quote}, have {available:.2f}"
+                    f"Need {total_cost:.2f} {quote}, have {available:.2f}"
                 )
-            self._balances[quote] = available - cost
+            self._balances[quote] = available - total_cost
             self._balances[base] = self._balances.get(base, 0.0) + amount
-        elif side.upper() == "SELL":
+        else:
             available = self._balances.get(base, 0.0)
             if available < amount:
                 raise InsufficientFundsError(
                     f"Need {amount} {base}, have {available}"
                 )
             self._balances[base] = available - amount
-            self._balances[quote] = self._balances.get(quote, 0.0) + cost
-        else:
-            raise OrderError(f"Unknown side: {side}")
+            self._balances[quote] = self._balances.get(quote, 0.0) + cost - fee
 
         ts = pd.Timestamp(row["timestamp"]).to_pydatetime()
         order = Order(
