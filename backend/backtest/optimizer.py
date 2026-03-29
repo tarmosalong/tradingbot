@@ -65,15 +65,15 @@ PARAM_SPACES: dict[str, dict[str, dict]] = {
         },
     },
     "aggregator": {
-        "min_agreement": {"type": "int", "low": 1, "high": 4},
+        "min_agreement": {"type": "int", "low": 1, "high": 2},
         "hold_opposition": {"type": "float", "low": 0.0, "high": 0.3},
     },
     "regime": {
         "regime_trending_threshold": {"type": "float", "low": 20.0, "high": 35.0},
         "regime_hysteresis_buffer": {"type": "float", "low": 2.0, "high": 10.0},
         "regime_trending_ema_weight": {"type": "float", "low": 1.0, "high": 2.5},
-        "regime_trending_mr_weight": {"type": "float", "low": 0.0, "high": 0.5},
-        "regime_ranging_ema_weight": {"type": "float", "low": 0.0, "high": 0.5},
+        "regime_trending_mr_weight": {"type": "float", "low": 0.0, "high": 0.25},
+        "regime_ranging_ema_weight": {"type": "float", "low": 0.0, "high": 0.25},
         "regime_ranging_mr_weight": {"type": "float", "low": 0.8, "high": 2.0},
     },
 }

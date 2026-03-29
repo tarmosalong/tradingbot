@@ -368,7 +368,7 @@ class TradingEngine:
                 )
         return signals
 
-    AGREEMENT_WEIGHT_THRESHOLD = 0.3
+    AGREEMENT_WEIGHT_THRESHOLD = 0.5
 
     @staticmethod
     def _aggregate_signals(
