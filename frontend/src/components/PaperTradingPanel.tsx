@@ -20,14 +20,26 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
   const [pollSec, setPollSec] = useState('60');
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [msg, setMsg] = useState<string | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const fetchStatus = useCallback(async () => {
     try {
       const s = await api.botStatus();
       setStatus(s);
-    } catch {
+      setStatusError(null);
+    } catch (e) {
       setStatus(null);
+      const m = e instanceof Error ? e.message : String(e);
+      const missingBot =
+        m === 'Not Found' ||
+        /\b404\b/.test(m) ||
+        m.toLowerCase().includes('not found');
+      setStatusError(
+        missingBot
+          ? 'GET /api/bot/status returned 404. From the repo root, run the FastAPI app (not only python -m backend.main): uvicorn backend.api.app:app --reload --port 8000 — port must match frontend/vite.config.ts proxy.'
+          : m,
+      );
     }
   }, []);
 
@@ -55,6 +67,7 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
   const canControl = status?.control_enabled !== false;
   const stopped = state === 'stopped' || state === null;
   const running = state === 'running' || state === 'starting';
+  const botApiUnavailable = statusError !== null;
 
   async function handleStart() {
     setBusy(true);
@@ -154,7 +167,7 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
           <button
             type="button"
             onClick={() => void handleStart()}
-            disabled={busy || !canControl || running}
+            disabled={busy || botApiUnavailable || !canControl || running}
             className="text-xs px-3 py-1.5 rounded-md bg-[var(--accent-green)] text-white disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
           >
             Start
@@ -162,7 +175,7 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
           <button
             type="button"
             onClick={() => void handleStop()}
-            disabled={busy || !running}
+            disabled={busy || botApiUnavailable || !running}
             className="text-xs px-3 py-1.5 rounded-md bg-[var(--accent-red)]/90 text-white disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
           >
             Stop
@@ -171,6 +184,11 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
       </div>
 
       <div className="p-4 space-y-3 text-sm">
+        {statusError && (
+          <p className="text-xs text-[var(--accent-red)] border border-[var(--accent-red)]/25 rounded px-2 py-1.5 leading-relaxed">
+            {statusError}
+          </p>
+        )}
         {!canControl && (
           <p className="text-xs text-[var(--accent-red)]">
             Bot control is disabled (set <code className="bg-[var(--bg-secondary)] px-1 rounded">BOT_CONTROL_ENABLED=true</code> in{' '}
@@ -200,7 +218,7 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
             step={100}
             value={balance}
             onChange={(e) => setBalance(e.target.value)}
-            disabled={!stopped}
+            disabled={!stopped || botApiUnavailable}
             className="w-full rounded-md border border-[var(--border)] bg-[var(--bg-secondary)] px-3 py-2 text-sm disabled:opacity-50"
           />
         </label>
@@ -211,7 +229,7 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
             type="text"
             value={pairs}
             onChange={(e) => setPairs(e.target.value)}
-            disabled={!stopped}
+            disabled={!stopped || botApiUnavailable}
             placeholder="BTC/USDT, ETH/USDT"
             className="w-full rounded-md border border-[var(--border)] bg-[var(--bg-secondary)] px-3 py-2 text-sm disabled:opacity-50"
           />
@@ -223,7 +241,7 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
             <select
               value={timeframe}
               onChange={(e) => setTimeframe(e.target.value)}
-              disabled={!stopped}
+              disabled={!stopped || botApiUnavailable}
               className="w-full rounded-md border border-[var(--border)] bg-[var(--bg-secondary)] px-3 py-2 text-sm disabled:opacity-50"
             >
               {TIMEFRAMES.map((tf) => (
@@ -241,7 +259,7 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
               max={86400}
               value={pollSec}
               onChange={(e) => setPollSec(e.target.value)}
-              disabled={!stopped}
+              disabled={!stopped || botApiUnavailable}
               className="w-full rounded-md border border-[var(--border)] bg-[var(--bg-secondary)] px-3 py-2 text-sm disabled:opacity-50"
             />
           </label>
@@ -256,7 +274,7 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
                   type="checkbox"
                   checked={selected.has(key)}
                   onChange={() => toggleStrategy(key)}
-                  disabled={!stopped}
+                  disabled={!stopped || botApiUnavailable}
                   className="rounded border-[var(--border)]"
                 />
                 <span className="uppercase text-xs tracking-wide">{key}</span>
@@ -268,7 +286,7 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
         <button
           type="button"
           onClick={() => void handleSave()}
-          disabled={busy || !stopped}
+          disabled={busy || !stopped || botApiUnavailable}
           className="w-full py-2 rounded-md border border-[var(--border)] bg-[var(--bg-secondary)] text-sm font-medium hover:bg-[var(--border)]/40 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
         >
           Save settings to config.yaml

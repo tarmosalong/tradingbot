@@ -781,6 +781,8 @@ All REST endpoints are prefixed with `/api`.
 
 **Paper dashboard control:** With `trading.mode: paper`, the React dashboard can start/stop the bot and edit paper settings without restarting uvicorn. Changing `initial_balance_usdt` affects the next run, not an already-running simulated book. Disable remote start/stop with `BOT_CONTROL_ENABLED=false` in `.env`.
 
+If the dashboard shows **Not Found** for bot actions, the API process is missing `/api/bot/*` routes — restart it with the current code using `uvicorn backend.api.app:app` (port `8000` must match the Vite proxy in `frontend/vite.config.ts`).
+
 ### WebSocket
 
 | Path | Description |
@@ -997,10 +999,10 @@ LOG_LEVEL=INFO              # DEBUG | INFO | WARNING
 ## Getting Started
 
 ```bash
-# Backend (API server)
-uvicorn backend.api.app:app --host 0.0.0.0 --port 8000
+# Backend (API server) — required for dashboard + /api/bot/* Start/Stop
+uvicorn backend.api.app:app --host 0.0.0.0 --port 8000 --reload
 
-# Frontend (dev server)
+# Frontend (dev server; proxies /api and /ws to port 8000)
 cd frontend && npm run dev
 
 # Live/Paper trading bot

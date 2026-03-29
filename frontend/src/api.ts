@@ -51,8 +51,12 @@ export interface BotConfig {
 
 async function fetchJson<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`);
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
-  return res.json();
+  const text = await res.text();
+  if (!res.ok) {
+    const detail = parseErrorDetail(text);
+    throw new Error(detail || `API error: ${res.status}`);
+  }
+  return (text ? JSON.parse(text) : {}) as T;
 }
 
 function parseErrorDetail(text: string): string {
