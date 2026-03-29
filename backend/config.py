@@ -50,6 +50,31 @@ class EMAConfig:
     slow_period: int = 21
 
 
+def _default_trending_weights() -> dict[str, float]:
+    return {"ema": 1.5, "rsi": 0.2, "macd": 0.3, "bollinger": 0.2}
+
+
+def _default_ranging_weights() -> dict[str, float]:
+    return {"ema": 0.2, "rsi": 1.2, "macd": 1.0, "bollinger": 1.2}
+
+
+def _default_volatile_weights() -> dict[str, float]:
+    return {"ema": 0.5, "rsi": 0.5, "macd": 0.5, "bollinger": 0.5}
+
+
+@dataclass(frozen=True)
+class RegimeConfig:
+    enabled: bool = False
+    adx_period: int = 14
+    trending_threshold: float = 25.0
+    hysteresis_buffer: float = 5.0
+    volatile_atr_percentile: float = 80.0
+    atr_lookback: int = 100
+    trending_weights: dict[str, float] = field(default_factory=_default_trending_weights)
+    ranging_weights: dict[str, float] = field(default_factory=_default_ranging_weights)
+    volatile_weights: dict[str, float] = field(default_factory=_default_volatile_weights)
+
+
 @dataclass(frozen=True)
 class StrategiesConfig:
     enabled: list[str] = field(default_factory=lambda: ["rsi", "macd", "bollinger"])
@@ -57,6 +82,7 @@ class StrategiesConfig:
     macd: MACDConfig = field(default_factory=MACDConfig)
     bollinger: BollingerConfig = field(default_factory=BollingerConfig)
     ema: EMAConfig = field(default_factory=EMAConfig)
+    regime: RegimeConfig = field(default_factory=RegimeConfig)
     weights: dict[str, float] = field(default_factory=dict)
     min_agreement: int = 1
     hold_opposition: float = 0.0

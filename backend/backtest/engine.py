@@ -7,10 +7,11 @@ import pandas as pd
 
 from backend.backtest.ai_filter import AIFilterConfig, AISimulationFilter
 from backend.backtest.exchange import BacktestExchange
-from backend.config import RiskConfig
+from backend.config import RegimeConfig, RiskConfig
 from backend.core.engine import TradingEngine
 from backend.core.exceptions import ExchangeError, StrategyError
 from backend.core.logger import get_logger
+from backend.core.regime import RegimeDetector
 from backend.models import OrderSide, Signal, Trade
 from backend.risk.manager import RiskManager
 from backend.strategies.base import StrategyBase
@@ -101,6 +102,7 @@ class BacktestEngine:
         strategy_weights: dict[str, float] | None = None,
         min_agreement: int = 1,
         hold_opposition: float = 0.0,
+        regime_config: RegimeConfig | None = None,
     ) -> None:
         self._exchange = exchange
         self._strategies = strategies
@@ -111,6 +113,7 @@ class BacktestEngine:
         self._strategy_weights = strategy_weights
         self._min_agreement = min_agreement
         self._hold_opposition = hold_opposition
+        self._regime_detector = RegimeDetector(regime_config)
 
         self._position: Position | None = None
         self._last_trade_index = -999
@@ -135,6 +138,10 @@ class BacktestEngine:
             "ema_filtered": 0,
             "total_fees": 0.0,
             "total_slippage": 0.0,
+            "regime_trending_candles": 0,
+            "regime_ranging_candles": 0,
+            "regime_volatile_candles": 0,
+            "regime_transitions": 0,
         }
 
     async def run(self) -> BacktestResult:
@@ -207,12 +214,20 @@ class BacktestEngine:
                             break
                         continue
 
+                regime = self._regime_detector.detect(ohlcv)
+                regime_key = f"regime_{regime}_candles"
+                self._stats[regime_key] = int(self._stats.get(regime_key, 0)) + 1
+
+                dynamic_weights = self._regime_detector.get_weights(
+                    self._strategy_weights,
+                )
+
                 signals = await self._collect_signals(ohlcv)
 
                 if signals:
                     combined = TradingEngine._aggregate_signals(
                         signals,
-                        self._strategy_weights,
+                        dynamic_weights,
                         min_agreement=self._min_agreement,
                         hold_opposition=self._hold_opposition,
                     )
@@ -274,6 +289,7 @@ class BacktestEngine:
 
         self._stats["total_fees"] = self._exchange.total_fees_paid
         self._stats["total_slippage"] = self._exchange.total_slippage_cost
+        self._stats["regime_transitions"] = self._regime_detector.transitions
         result.engine_stats = dict(self._stats)
 
         logger.info(

@@ -33,6 +33,10 @@ interface EngineStats {
   regime_filtered: number;
   volume_filtered: number;
   ema_filtered: number;
+  regime_trending_candles: number;
+  regime_ranging_candles: number;
+  regime_volatile_candles: number;
+  regime_transitions: number;
   total_fees: number;
   total_slippage: number;
 }
@@ -159,6 +163,15 @@ interface BacktestProfile {
     dynamicSizing: boolean;
     regimeFilter: boolean;
   };
+  regime: {
+    enabled: boolean;
+    trendingThreshold: number;
+    hysteresisBuffer: number;
+    trendingEmaWeight: number;
+    trendingMrWeight: number;
+    rangingEmaWeight: number;
+    rangingMrWeight: number;
+  };
 }
 
 const PROFILES: Record<string, BacktestProfile> = {
@@ -179,6 +192,7 @@ const PROFILES: Record<string, BacktestProfile> = {
       riskPerTrade: 0.5, partialTp: 50,
     },
     engine: { fee: 0.1, slippage: 0.05, cooldown: 3, dynamicSizing: false, regimeFilter: true },
+    regime: { enabled: true, trendingThreshold: 25, hysteresisBuffer: 5, trendingEmaWeight: 1.5, trendingMrWeight: 0.2, rangingEmaWeight: 0.2, rangingMrWeight: 1.2 },
   },
   balanced: {
     label: 'Balanced',
@@ -197,6 +211,7 @@ const PROFILES: Record<string, BacktestProfile> = {
       riskPerTrade: 1.0, partialTp: 50,
     },
     engine: { fee: 0.1, slippage: 0.05, cooldown: 0, dynamicSizing: false, regimeFilter: false },
+    regime: { enabled: true, trendingThreshold: 25, hysteresisBuffer: 5, trendingEmaWeight: 1.5, trendingMrWeight: 0.2, rangingEmaWeight: 0.2, rangingMrWeight: 1.2 },
   },
   aggressive: {
     label: 'Aggressive',
@@ -215,6 +230,7 @@ const PROFILES: Record<string, BacktestProfile> = {
       riskPerTrade: 2.0, partialTp: 40,
     },
     engine: { fee: 0.1, slippage: 0.05, cooldown: 0, dynamicSizing: true, regimeFilter: false },
+    regime: { enabled: false, trendingThreshold: 25, hysteresisBuffer: 5, trendingEmaWeight: 1.5, trendingMrWeight: 0.2, rangingEmaWeight: 0.2, rangingMrWeight: 1.2 },
   },
   scalper: {
     label: 'Scalper',
@@ -233,6 +249,7 @@ const PROFILES: Record<string, BacktestProfile> = {
       riskPerTrade: 1.5, partialTp: 60,
     },
     engine: { fee: 0.1, slippage: 0.1, cooldown: 0, dynamicSizing: true, regimeFilter: false },
+    regime: { enabled: false, trendingThreshold: 25, hysteresisBuffer: 5, trendingEmaWeight: 1.5, trendingMrWeight: 0.2, rangingEmaWeight: 0.2, rangingMrWeight: 1.2 },
   },
   hodl: {
     label: 'HODL',
@@ -251,6 +268,7 @@ const PROFILES: Record<string, BacktestProfile> = {
       riskPerTrade: 0.5, partialTp: 30,
     },
     engine: { fee: 0.1, slippage: 0.05, cooldown: 5, dynamicSizing: false, regimeFilter: true },
+    regime: { enabled: true, trendingThreshold: 20, hysteresisBuffer: 7, trendingEmaWeight: 2.0, trendingMrWeight: 0.1, rangingEmaWeight: 0.1, rangingMrWeight: 1.5 },
   },
 };
 
@@ -325,6 +343,16 @@ export function BacktestPanel({ optimizedParams, onParamsApplied }: BacktestPane
   const [wfTrainPct, setWfTrainPct] = useState(70);
   const [wfStepType, setWfStepType] = useState<'rolling' | 'expanding'>('rolling');
 
+  const [regimeEnabled, setRegimeEnabled] = useState(false);
+  const [regimeAdxPeriod, setRegimeAdxPeriod] = useState(14);
+  const [regimeTrendingThreshold, setRegimeTrendingThreshold] = useState(25);
+  const [regimeHysteresisBuffer, setRegimeHysteresisBuffer] = useState(5);
+  const [regimeVolatileAtrPct, setRegimeVolatileAtrPct] = useState(80);
+  const [regimeTrendingEmaWeight, setRegimeTrendingEmaWeight] = useState(1.5);
+  const [regimeTrendingMrWeight, setRegimeTrendingMrWeight] = useState(0.2);
+  const [regimeRangingEmaWeight, setRegimeRangingEmaWeight] = useState(0.2);
+  const [regimeRangingMrWeight, setRegimeRangingMrWeight] = useState(1.2);
+
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -359,6 +387,16 @@ export function BacktestPanel({ optimizedParams, onParamsApplied }: BacktestPane
     if (p.ema_slow_period != null) setEmaSlowPeriod(p.ema_slow_period as number);
     if (p.min_agreement != null) setMinAgreement(p.min_agreement as number);
     if (p.hold_opposition != null) setHoldOpposition(p.hold_opposition as number);
+    if (p.regime_adx_period != null) setRegimeAdxPeriod(p.regime_adx_period as number);
+    if (p.regime_trending_threshold != null) {
+      setRegimeEnabled(true);
+      setRegimeTrendingThreshold(p.regime_trending_threshold as number);
+    }
+    if (p.regime_hysteresis_buffer != null) setRegimeHysteresisBuffer(p.regime_hysteresis_buffer as number);
+    if (p.regime_trending_ema_weight != null) setRegimeTrendingEmaWeight(p.regime_trending_ema_weight as number);
+    if (p.regime_trending_mr_weight != null) setRegimeTrendingMrWeight(p.regime_trending_mr_weight as number);
+    if (p.regime_ranging_ema_weight != null) setRegimeRangingEmaWeight(p.regime_ranging_ema_weight as number);
+    if (p.regime_ranging_mr_weight != null) setRegimeRangingMrWeight(p.regime_ranging_mr_weight as number);
     setShowAdvanced(true);
     onParamsApplied?.();
   }, [optimizedParams, onParamsApplied]);
@@ -397,7 +435,10 @@ export function BacktestPanel({ optimizedParams, onParamsApplied }: BacktestPane
         emaFastPeriod === p.ema.fastPeriod &&
         emaSlowPeriod === p.ema.slowPeriod &&
         minAgreement === p.signal.minAgreement &&
-        holdOpposition === p.signal.holdOpposition
+        holdOpposition === p.signal.holdOpposition &&
+        regimeEnabled === p.regime.enabled &&
+        regimeTrendingThreshold === p.regime.trendingThreshold &&
+        regimeHysteresisBuffer === p.regime.hysteresisBuffer
       ) {
         return id;
       }
@@ -409,6 +450,7 @@ export function BacktestPanel({ optimizedParams, onParamsApplied }: BacktestPane
     bollPeriod, bollStdDev,
     emaFastPeriod, emaSlowPeriod,
     minAgreement, holdOpposition,
+    regimeEnabled, regimeTrendingThreshold, regimeHysteresisBuffer,
     riskMaxPos, riskStopLoss, riskTrailingStop,
     riskMaxDrawdown, riskDailyLoss, riskMaxOrder, riskMinConfidence,
     atrStopMult, atrTpMult, atrTrailingMult,
@@ -453,6 +495,13 @@ export function BacktestPanel({ optimizedParams, onParamsApplied }: BacktestPane
     setEmaSlowPeriod(p.ema.slowPeriod);
     setMinAgreement(p.signal.minAgreement);
     setHoldOpposition(p.signal.holdOpposition);
+    setRegimeEnabled(p.regime.enabled);
+    setRegimeTrendingThreshold(p.regime.trendingThreshold);
+    setRegimeHysteresisBuffer(p.regime.hysteresisBuffer);
+    setRegimeTrendingEmaWeight(p.regime.trendingEmaWeight);
+    setRegimeTrendingMrWeight(p.regime.trendingMrWeight);
+    setRegimeRangingEmaWeight(p.regime.rangingEmaWeight);
+    setRegimeRangingMrWeight(p.regime.rangingMrWeight);
   }
 
   const toggleStrategy = (id: string) => {
@@ -544,6 +593,17 @@ export function BacktestPanel({ optimizedParams, onParamsApplied }: BacktestPane
             n_folds: wfFolds,
             train_pct: wfTrainPct / 100,
             step_type: wfStepType,
+          },
+          regime: {
+            enabled: regimeEnabled,
+            adx_period: regimeAdxPeriod,
+            trending_threshold: regimeTrendingThreshold,
+            hysteresis_buffer: regimeHysteresisBuffer,
+            volatile_atr_percentile: regimeVolatileAtrPct,
+            trending_ema_weight: regimeTrendingEmaWeight,
+            trending_mr_weight: regimeTrendingMrWeight,
+            ranging_ema_weight: regimeRangingEmaWeight,
+            ranging_mr_weight: regimeRangingMrWeight,
           },
         }),
       });
@@ -853,6 +913,31 @@ export function BacktestPanel({ optimizedParams, onParamsApplied }: BacktestPane
                   <ParamInput label="TP Sell Ratio %" value={takeProfitRatio} onChange={setTakeProfitRatio} min={10} max={100} tooltip="What percentage of the position to sell at take-profit. 50 = sell half, 100 = sell all. Default: 50%" />
                 )}
               </div>
+            </div>
+
+            <div>
+              <h3 className="text-xs font-medium text-[var(--accent)] mb-2">Regime Detection (Adaptive Weights)</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="flex items-center gap-2" title="Detect market regime (trending/ranging/volatile) using ADX and dynamically adjust strategy weights. Boosts trend-following (EMA) in trends and mean-reversion (RSI/MACD/Bollinger) in ranging markets.">
+                  <input type="checkbox" checked={regimeEnabled} onChange={(e) => setRegimeEnabled(e.target.checked)} className="w-4 h-4 rounded accent-[var(--accent)] cursor-pointer" />
+                  <span className="text-xs text-[var(--text-secondary)] border-b border-dotted border-[var(--text-secondary)]/40 cursor-help">Enable</span>
+                </div>
+                {regimeEnabled && (
+                  <>
+                    <ParamInput label="ADX Threshold" value={regimeTrendingThreshold} onChange={setRegimeTrendingThreshold} min={15} max={40} tooltip="ADX value above which the market is classified as trending. With hysteresis, enter trending at threshold+buffer, exit at threshold-buffer. Default: 25" />
+                    <ParamInput label="Hysteresis Buffer" value={regimeHysteresisBuffer} onChange={setRegimeHysteresisBuffer} min={1} max={15} tooltip="Buffer zone around the ADX threshold to prevent rapid regime flipping. Larger = more stable regime detection but slower transitions. Default: 5" />
+                    <ParamInput label="Volatile ATR %ile" value={regimeVolatileAtrPct} onChange={setRegimeVolatileAtrPct} min={50} max={99} tooltip="ATR percentile above which the market is classified as volatile. All strategy weights are reduced in volatile conditions. Default: 80" />
+                  </>
+                )}
+              </div>
+              {regimeEnabled && (
+                <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <ParamInput label="Trend: EMA Weight" value={regimeTrendingEmaWeight} onChange={setRegimeTrendingEmaWeight} min={0} max={3} step={0.1} tooltip="Weight multiplier for EMA strategy in trending markets. Higher = more influence. Default: 1.5" />
+                  <ParamInput label="Trend: MR Weight" value={regimeTrendingMrWeight} onChange={setRegimeTrendingMrWeight} min={0} max={2} step={0.1} tooltip="Weight multiplier for mean-reversion strategies (RSI/MACD/Bollinger) in trending markets. Lower = less influence. Default: 0.2" />
+                  <ParamInput label="Range: EMA Weight" value={regimeRangingEmaWeight} onChange={setRegimeRangingEmaWeight} min={0} max={2} step={0.1} tooltip="Weight multiplier for EMA strategy in ranging markets. Lower = less influence. Default: 0.2" />
+                  <ParamInput label="Range: MR Weight" value={regimeRangingMrWeight} onChange={setRegimeRangingMrWeight} min={0} max={3} step={0.1} tooltip="Weight multiplier for mean-reversion strategies in ranging markets. Higher = more influence. Default: 1.2" />
+                </div>
+              )}
             </div>
 
             <div>
@@ -1177,6 +1262,10 @@ export function BacktestPanel({ optimizedParams, onParamsApplied }: BacktestPane
                 <AIStatItem label="Regime Filtered" value={result.report.engine_stats.regime_filtered} tooltip="Candles where signals were skipped because ADX indicated a strong trend." />
                 <AIStatItem label="Volume Filtered" value={result.report.engine_stats.volume_filtered} tooltip="Signals blocked by volume confirmation filter (volume too low vs SMA-20)." />
                 <AIStatItem label="EMA Filtered" value={result.report.engine_stats.ema_filtered} tooltip="Signals blocked by EMA trend filter (counter-trend trade)." />
+                <AIStatItem label="Trending Candles" value={(result.report.engine_stats as any).regime_trending_candles ?? 0} tooltip="Number of candles classified as trending regime." />
+                <AIStatItem label="Ranging Candles" value={(result.report.engine_stats as any).regime_ranging_candles ?? 0} tooltip="Number of candles classified as ranging regime." />
+                <AIStatItem label="Volatile Candles" value={(result.report.engine_stats as any).regime_volatile_candles ?? 0} tooltip="Number of candles classified as volatile regime." />
+                <AIStatItem label="Regime Transitions" value={(result.report.engine_stats as any).regime_transitions ?? 0} tooltip="Number of times the detected regime changed (fewer = more stable detection)." />
               </div>
               {result.report.engine_stats.drawdown_halt_candle !== null && (
                 <div className="mt-2 text-xs text-[var(--accent-red)] font-medium">

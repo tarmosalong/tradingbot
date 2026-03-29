@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from backend.config import Settings
 from backend.core.exceptions import ExchangeError, StrategyError
 from backend.core.logger import get_logger
+from backend.core.regime import RegimeDetector
 from backend.database import Database
 from backend.exchange.base import ExchangeBase
 from backend.models import OrderSide, Signal, Trade
@@ -135,6 +136,7 @@ class TradingEngine:
         self._consecutive_errors = 0
         self._risk_manager = RiskManager(settings.risk, database)
         self._halted = False
+        self._regime_detector = RegimeDetector(settings.strategies.regime)
 
     @property
     def is_running(self) -> bool:
@@ -272,9 +274,14 @@ class TradingEngine:
 
             await self._persist_signals(signals)
 
+            regime = self._regime_detector.detect(ohlcv)
+            dynamic_weights = self._regime_detector.get_weights(
+                self._settings.strategies.weights,
+            )
+
             combined = self._aggregate_signals(
                 signals,
-                self._settings.strategies.weights,
+                dynamic_weights,
                 min_agreement=self._settings.strategies.min_agreement,
                 hold_opposition=self._settings.strategies.hold_opposition,
             )
@@ -284,6 +291,7 @@ class TradingEngine:
                 direction=combined.direction,
                 confidence=combined.confidence,
                 reason=combined.reason,
+                regime=regime,
             )
 
             await self._persist_signals([combined])

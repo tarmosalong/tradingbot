@@ -16,6 +16,7 @@ from backend.config import (
     BollingerConfig,
     EMAConfig,
     MACDConfig,
+    RegimeConfig,
     RiskConfig,
     RSIConfig,
 )
@@ -66,6 +67,14 @@ PARAM_SPACES: dict[str, dict[str, dict]] = {
     "aggregator": {
         "min_agreement": {"type": "int", "low": 1, "high": 4},
         "hold_opposition": {"type": "float", "low": 0.0, "high": 0.3},
+    },
+    "regime": {
+        "regime_trending_threshold": {"type": "float", "low": 20.0, "high": 35.0},
+        "regime_hysteresis_buffer": {"type": "float", "low": 2.0, "high": 10.0},
+        "regime_trending_ema_weight": {"type": "float", "low": 1.0, "high": 2.5},
+        "regime_trending_mr_weight": {"type": "float", "low": 0.0, "high": 0.5},
+        "regime_ranging_ema_weight": {"type": "float", "low": 0.0, "high": 0.5},
+        "regime_ranging_mr_weight": {"type": "float", "low": 0.8, "high": 2.0},
     },
 }
 
@@ -141,6 +150,7 @@ class BuiltConfig:
     slippage: float
     min_agreement: int = 1
     hold_opposition: float = 0.0
+    regime_config: RegimeConfig | None = None
 
 
 def _build_configs_from_params(
@@ -202,6 +212,30 @@ def _build_configs_from_params(
         use_dynamic_sizing=params.get("use_dynamic_sizing", False),
     )
 
+    regime_cfg = None
+    if "regime_trending_threshold" in params:
+        mr_weight_trending = params.get("regime_trending_mr_weight", 0.2)
+        ema_weight_trending = params.get("regime_trending_ema_weight", 1.5)
+        mr_weight_ranging = params.get("regime_ranging_mr_weight", 1.2)
+        ema_weight_ranging = params.get("regime_ranging_ema_weight", 0.2)
+        regime_cfg = RegimeConfig(
+            enabled=True,
+            trending_threshold=params.get("regime_trending_threshold", 25.0),
+            hysteresis_buffer=params.get("regime_hysteresis_buffer", 5.0),
+            trending_weights={
+                "ema": ema_weight_trending,
+                "rsi": mr_weight_trending,
+                "macd": mr_weight_trending,
+                "bollinger": mr_weight_trending,
+            },
+            ranging_weights={
+                "ema": ema_weight_ranging,
+                "rsi": mr_weight_ranging,
+                "macd": mr_weight_ranging,
+                "bollinger": mr_weight_ranging,
+            },
+        )
+
     return BuiltConfig(
         strategies=strats,
         risk=risk_config,
@@ -210,6 +244,7 @@ def _build_configs_from_params(
         slippage=base_slippage,
         min_agreement=params.get("min_agreement", 1),
         hold_opposition=params.get("hold_opposition", 0.0),
+        regime_config=regime_cfg,
     )
 
 
@@ -277,6 +312,7 @@ async def run_optimization(
             engine_config=built.engine,
             min_agreement=built.min_agreement,
             hold_opposition=built.hold_opposition,
+            regime_config=built.regime_config,
         )
         result = await engine.run()
         report = generate_report(result)
@@ -344,6 +380,7 @@ async def run_optimization(
             slippage_rate=built.slippage,
             min_agreement=built.min_agreement,
             hold_opposition=built.hold_opposition,
+            regime_config=built.regime_config,
         )
         opt_result.validation = wf_result.to_dict()
 

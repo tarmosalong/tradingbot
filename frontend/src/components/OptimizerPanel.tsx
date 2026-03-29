@@ -45,6 +45,7 @@ const TUNE_GROUPS = [
   { id: 'guards', label: 'Trading Guards', desc: 'Volume filter, EMA trend' },
   { id: 'engine', label: 'Engine', desc: 'Cooldown, dynamic sizing' },
   { id: 'aggregator', label: 'Signal Aggregator', desc: 'Min agreement, HOLD opposition' },
+  { id: 'regime', label: 'Regime Detection', desc: 'ADX threshold, hysteresis, regime weights' },
 ] as const;
 
 const SCORING_OPTIONS = [
@@ -87,6 +88,12 @@ const PARAM_LABELS: Record<string, string> = {
   ema_slow_period: 'EMA Slow',
   min_agreement: 'Min Agreement',
   hold_opposition: 'HOLD Opp.',
+  regime_trending_threshold: 'Trending Threshold',
+  regime_hysteresis_buffer: 'Hysteresis Buffer',
+  regime_trending_ema_weight: 'Trend: EMA Weight',
+  regime_trending_mr_weight: 'Trend: MR Weight',
+  regime_ranging_ema_weight: 'Range: EMA Weight',
+  regime_ranging_mr_weight: 'Range: MR Weight',
 };
 
 function formatParamValue(key: string, val: number | boolean): string {

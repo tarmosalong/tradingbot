@@ -155,6 +155,7 @@ tradingbot/
 │   │   └── runner.py           # CLI backtest runner
 │   ├── core/
 │   │   ├── engine.py           # TradingEngine (live loop)
+│   │   ├── regime.py           # ADX regime detection + dynamic weights
 │   │   ├── scheduler.py        # PeriodicTask utility
 │   │   ├── safety.py           # Live trading safety checks
 │   │   ├── logger.py           # structlog setup
@@ -252,6 +253,21 @@ graph TD
 | `weights` | dict[str,float] | `{}` | Per-strategy weights for aggregation (default 1.0) |
 | `min_agreement` | int | `1` | Min strategies agreeing on direction before executing |
 | `hold_opposition` | float | `0.0` | Penalty per HOLD signal against directional signals |
+| `regime` | `RegimeConfig` | See RegimeConfig | Regime detection configuration |
+
+#### RegimeConfig
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `false` | Enable ADX-based regime detection |
+| `adx_period` | int | `14` | ADX indicator period |
+| `trending_threshold` | float | `25.0` | ADX value above which market is considered trending |
+| `hysteresis_buffer` | float | `5.0` | Buffer zone to prevent rapid regime flipping |
+| `volatile_atr_percentile` | float | `80.0` | ATR percentile above which market is classified as volatile |
+| `atr_lookback` | int | `100` | Number of candles for ATR percentile calculation |
+| `trending_weights` | dict | `{ema: 1.5, rsi: 0.2, macd: 0.3, bollinger: 0.2}` | Strategy weight multipliers in trending regime |
+| `ranging_weights` | dict | `{ema: 0.2, rsi: 1.2, macd: 1.0, bollinger: 1.2}` | Strategy weight multipliers in ranging regime |
+| `volatile_weights` | dict | `{ema: 0.5, rsi: 0.5, macd: 0.5, bollinger: 0.5}` | Strategy weight multipliers in volatile regime |
 
 #### RSIConfig
 | Field | Type | Default | Description |
@@ -484,6 +500,30 @@ graph TD
     HOLD --> FINAL
 ```
 
+### Regime Detection
+
+The bot uses ADX-based market regime detection to dynamically adjust strategy weights based on market conditions.
+
+**Three Regimes:**
+- **Trending** (ADX > threshold + buffer): EMA crossover strategy weight boosted, mean-reversion suppressed
+- **Ranging** (ADX < threshold - buffer): RSI/MACD/Bollinger boosted, EMA suppressed  
+- **Volatile** (ATR percentile > 80th): All strategy weights reduced for conservative trading
+
+**Hysteresis** prevents whipsaw regime flipping. The ADX must cross a higher band to enter trending and a lower band to exit, avoiding rapid oscillation near the boundary.
+
+```
+Data → ADX + ATR Percentile
+      │
+      ├── ADX > threshold + buffer → TRENDING
+      │   └── EMA ×1.5, RSI ×0.2, MACD ×0.3, Bollinger ×0.2
+      │
+      ├── ATR pct > 80 → VOLATILE
+      │   └── All strategies ×0.5
+      │
+      └── Otherwise → RANGING
+          └── EMA ×0.2, RSI ×1.2, MACD ×1.0, Bollinger ×1.2
+```
+
 ### RSI Strategy Logic
 
 ```mermaid
@@ -642,6 +682,7 @@ Automated parameter search using Bayesian optimization (Optuna TPE sampler). Run
 | `guards` | volume_min_multiplier, ema_trend_period, ema_trend_enabled |
 | `engine` | cooldown_candles, use_dynamic_sizing |
 | `aggregator` | min_agreement (1–4), hold_opposition (0.0–0.3) |
+| `regime` | `regime_trending_threshold`, `regime_hysteresis_buffer`, `regime_trending_ema_weight`, `regime_trending_mr_weight`, `regime_ranging_ema_weight`, `regime_ranging_mr_weight` | ADX threshold, hysteresis, per-regime strategy weight multipliers |
 
 **Scoring metrics:** `sharpe` (risk-adjusted return, default), `return` (total return %), `calmar` (return / max drawdown).
 
@@ -955,6 +996,15 @@ If the dashboard shows **Not Found** for bot actions, the API process is missing
   "macd": { "fast": 12, "slow": 26, "signal": 9 },
   "bollinger": { "period": 20, "std_dev": 2.0 },
   "ema": { "fast_period": 9, "slow_period": 21 },
+  "regime": {
+    "enabled": true,
+    "trending_threshold": 25.0,
+    "hysteresis_buffer": 5.0,
+    "trending_ema_weight": 1.5,
+    "trending_mr_weight": 0.2,
+    "ranging_ema_weight": 0.2,
+    "ranging_mr_weight": 1.2
+  },
   "min_agreement": 2,
   "hold_opposition": 0.1,
   "risk": {
@@ -1213,4 +1263,5 @@ ruff check backend/ tests/
 | `tests/core/test_engine_scenarios.py` | 63 | End-to-end scenarios: slippage, whipsaw, flash crash, exchange errors, multi-position, halt persistence |
 | `tests/api/test_routes.py` | 13 | REST endpoints: health, config, trades, orders, portfolio, signals |
 | `tests/strategies/test_ema_strategy.py` | 8 | EMA crossover: bullish/bearish signals, HOLD, confidence scaling, config |
-| `tests/` (all) | **393** | Full suite — `pytest tests/ -v` |
+| `core/regime.py` | 23 | Regime classification, hysteresis, weight maps, ATR percentile |
+| `tests/` (all) | **419** | Full suite — `pytest tests/ -v` |

@@ -12,7 +12,7 @@ import pytest
 
 from backend.backtest.engine import BacktestEngine, EngineConfig, Position
 from backend.backtest.exchange import BacktestExchange
-from backend.config import RiskConfig
+from backend.config import RegimeConfig, RiskConfig
 from backend.models import Signal
 from backend.strategies.base import StrategyBase
 
@@ -1078,3 +1078,146 @@ class TestEMAStrategyParity:
         )
         result = await engine.run()
         assert len(result.trades) > 0, "EMA on trending data should produce trades"
+
+
+# ---------------------------------------------------------------------------
+# Regime Detection Integration Tests
+# ---------------------------------------------------------------------------
+
+
+class _NamedFixedStrategy(StrategyBase):
+    """Strategy with a custom name for testing regime weight differentiation."""
+
+    def __init__(self, strat_name: str, direction: str, confidence: float = 0.8):
+        super().__init__()
+        self._strat_name = strat_name
+        self._direction = direction
+        self._confidence = confidence
+
+    @property
+    def name(self) -> str:
+        return self._strat_name
+
+    async def analyze(self, symbol: str, ohlcv) -> Signal:
+        return Signal(
+            symbol=symbol,
+            direction=self._direction,
+            confidence=self._confidence,
+            strategy_name=self._strat_name,
+            reason=f"Fixed signal: {self._direction}",
+        )
+
+
+class TestRegimeDetectionParity:
+    """Test that regime-adaptive weighting changes backtest behaviour."""
+
+    @pytest.mark.asyncio
+    async def test_regime_stats_tracked(self):
+        """When regime detection is enabled, regime stats should be populated."""
+        ohlcv = _uptrend_ohlcv(80)
+        regime_cfg = RegimeConfig(
+            enabled=True,
+            trending_threshold=20.0,
+            hysteresis_buffer=3.0,
+        )
+        ex = BacktestExchange(
+            ohlcv=ohlcv, initial_balance_usdt=10000,
+            symbol="BTC/USDT", fee_rate=0.001, slippage_rate=0.0005,
+        )
+        engine = BacktestEngine(
+            exchange=ex,
+            strategies=[_FixedStrategy("BUY", 0.7)],
+            symbol="BTC/USDT",
+            risk_config=_risk(),
+            regime_config=regime_cfg,
+        )
+        result = await engine.run()
+
+        total_regime = (
+            int(result.engine_stats.get("regime_trending_candles", 0))
+            + int(result.engine_stats.get("regime_ranging_candles", 0))
+            + int(result.engine_stats.get("regime_volatile_candles", 0))
+        )
+        assert total_regime > 0, "Regime candle counts should be tracked"
+        assert "regime_transitions" in result.engine_stats
+
+    @pytest.mark.asyncio
+    async def test_regime_disabled_no_change(self):
+        """With regime disabled, backtest should produce identical results
+        to a run with no regime config at all."""
+        ohlcv = _uptrend_ohlcv(80)
+        ex1 = BacktestExchange(
+            ohlcv=ohlcv.copy(), initial_balance_usdt=10000,
+            symbol="BTC/USDT", fee_rate=0.001, slippage_rate=0.0005,
+        )
+        engine1 = BacktestEngine(
+            exchange=ex1,
+            strategies=[_FixedStrategy("BUY", 0.7)],
+            symbol="BTC/USDT",
+            risk_config=_risk(),
+        )
+        r1 = await engine1.run()
+
+        ex2 = BacktestExchange(
+            ohlcv=ohlcv.copy(), initial_balance_usdt=10000,
+            symbol="BTC/USDT", fee_rate=0.001, slippage_rate=0.0005,
+        )
+        engine2 = BacktestEngine(
+            exchange=ex2,
+            strategies=[_FixedStrategy("BUY", 0.7)],
+            symbol="BTC/USDT",
+            risk_config=_risk(),
+            regime_config=RegimeConfig(enabled=False),
+        )
+        r2 = await engine2.run()
+
+        assert len(r1.trades) == len(r2.trades)
+        assert abs(r1.final_balance - r2.final_balance) < 0.01
+
+    @pytest.mark.asyncio
+    async def test_regime_changes_weights(self):
+        """Regime detection with two conflicting strategies should produce
+        different results when regime weights shift the dominant strategy."""
+        ohlcv = _uptrend_ohlcv(80)
+
+        buyer = _NamedFixedStrategy("ema", "BUY", 0.6)
+        seller = _NamedFixedStrategy("rsi", "SELL", 0.5)
+
+        ex_no_regime = BacktestExchange(
+            ohlcv=ohlcv.copy(), initial_balance_usdt=10000,
+            symbol="BTC/USDT", fee_rate=0.001, slippage_rate=0.0005,
+        )
+        engine_no = BacktestEngine(
+            exchange=ex_no_regime,
+            strategies=[buyer, seller],
+            symbol="BTC/USDT",
+            risk_config=_risk(),
+            strategy_weights={"ema": 1.0, "rsi": 1.0},
+        )
+        result_no = await engine_no.run()
+
+        regime_cfg = RegimeConfig(
+            enabled=True,
+            trending_threshold=15.0,
+            hysteresis_buffer=2.0,
+            trending_weights={"ema": 0.01, "rsi": 5.0},
+            ranging_weights={"ema": 0.01, "rsi": 5.0},
+            volatile_weights={"ema": 0.01, "rsi": 5.0},
+        )
+        ex_regime = BacktestExchange(
+            ohlcv=ohlcv.copy(), initial_balance_usdt=10000,
+            symbol="BTC/USDT", fee_rate=0.001, slippage_rate=0.0005,
+        )
+        engine_regime = BacktestEngine(
+            exchange=ex_regime,
+            strategies=[buyer, seller],
+            symbol="BTC/USDT",
+            risk_config=_risk(),
+            regime_config=regime_cfg,
+            strategy_weights={"ema": 1.0, "rsi": 1.0},
+        )
+        result_regime = await engine_regime.run()
+
+        assert result_no.final_balance != result_regime.final_balance or \
+            len(result_no.trades) != len(result_regime.trades), \
+            "Regime weighting should change trading behaviour"

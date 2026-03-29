@@ -192,6 +192,19 @@ class EngineParams(BaseModel):
     take_profit_ratio: float = 0.5
 
 
+class RegimeParams(BaseModel):
+    enabled: bool = False
+    adx_period: int = 14
+    trending_threshold: float = 25.0
+    hysteresis_buffer: float = 5.0
+    volatile_atr_percentile: float = 80.0
+    atr_lookback: int = 100
+    trending_ema_weight: float = 1.5
+    trending_mr_weight: float = 0.2
+    ranging_ema_weight: float = 0.2
+    ranging_mr_weight: float = 1.2
+
+
 class WalkForwardParams(BaseModel):
     enabled: bool = False
     n_folds: int = 3
@@ -215,6 +228,7 @@ class BacktestRequest(BaseModel):
     ai_filter: AIFilterParams = AIFilterParams()
     engine: EngineParams = EngineParams()
     walk_forward: WalkForwardParams = WalkForwardParams()
+    regime: RegimeParams = RegimeParams()
     min_agreement: int = 1
     hold_opposition: float = 0.0
 
@@ -323,6 +337,7 @@ async def run_backtest(req: BacktestRequest):
     )
 
     from backend.backtest.engine import EngineConfig
+    from backend.config import RegimeConfig
 
     engine_cfg = EngineConfig(
         min_confidence=req.engine.min_confidence,
@@ -332,6 +347,27 @@ async def run_backtest(req: BacktestRequest):
         adx_trending_threshold=req.engine.adx_trending_threshold,
         take_profit_pct=req.engine.take_profit_pct,
         take_profit_ratio=req.engine.take_profit_ratio,
+    )
+
+    regime_cfg = RegimeConfig(
+        enabled=req.regime.enabled,
+        adx_period=req.regime.adx_period,
+        trending_threshold=req.regime.trending_threshold,
+        hysteresis_buffer=req.regime.hysteresis_buffer,
+        volatile_atr_percentile=req.regime.volatile_atr_percentile,
+        atr_lookback=req.regime.atr_lookback,
+        trending_weights={
+            "ema": req.regime.trending_ema_weight,
+            "rsi": req.regime.trending_mr_weight,
+            "macd": req.regime.trending_mr_weight,
+            "bollinger": req.regime.trending_mr_weight,
+        },
+        ranging_weights={
+            "ema": req.regime.ranging_ema_weight,
+            "rsi": req.regime.ranging_mr_weight,
+            "macd": req.regime.ranging_mr_weight,
+            "bollinger": req.regime.ranging_mr_weight,
+        },
     )
 
     engine = BacktestEngine(
@@ -344,6 +380,7 @@ async def run_backtest(req: BacktestRequest):
         strategy_weights=req.strategy_weights or None,
         min_agreement=req.min_agreement,
         hold_opposition=req.hold_opposition,
+        regime_config=regime_cfg,
     )
 
     result = await engine.run()
@@ -404,6 +441,7 @@ async def run_backtest(req: BacktestRequest):
             strategy_weights=req.strategy_weights or None,
             min_agreement=req.min_agreement,
             hold_opposition=req.hold_opposition,
+            regime_config=regime_cfg,
         )
         response["walk_forward"] = wf_result.to_dict()
 
