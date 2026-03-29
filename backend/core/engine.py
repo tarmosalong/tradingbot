@@ -368,6 +368,8 @@ class TradingEngine:
                 )
         return signals
 
+    AGREEMENT_WEIGHT_THRESHOLD = 0.3
+
     @staticmethod
     def _aggregate_signals(
         signals: list[Signal],
@@ -381,6 +383,10 @@ class TradingEngine:
         scores.  ``min_agreement`` requires at least N strategies to agree on
         a direction; ``hold_opposition`` adds a penalty from HOLD signals so
         a lone weak signal cannot win easily.
+
+        Strategies whose effective weight falls below
+        ``AGREEMENT_WEIGHT_THRESHOLD`` are excluded from the agreement count
+        so that regime-suppressed strategies cannot block trades.
         """
         w = weights or {}
         non_hold = [s for s in signals if s.direction != "HOLD"]
@@ -430,14 +436,22 @@ class TradingEngine:
         agreeing = [
             s for s in non_hold if s.direction == direction
         ]
-        if len(agreeing) < min_agreement:
+
+        threshold = TradingEngine.AGREEMENT_WEIGHT_THRESHOLD
+        significant = [
+            s for s in agreeing
+            if w.get(s.strategy_name, 1.0) >= threshold
+        ]
+        agreement_count = len(significant) if significant else len(agreeing)
+
+        if agreement_count < min_agreement:
             return Signal(
                 symbol=signals[0].symbol,
                 direction="HOLD",
                 confidence=0.0,
                 strategy_name="aggregator",
                 reason=(
-                    f"Only {len(agreeing)} {direction} "
+                    f"Only {agreement_count} significant {direction} "
                     f"(need {min_agreement})"
                 ),
             )

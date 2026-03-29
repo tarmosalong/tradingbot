@@ -1107,6 +1107,89 @@ class TestMinAgreement:
         assert result.direction == "BUY"
 
 
+class TestAgreementWeightThreshold:
+    def test_suppressed_strategies_excluded_from_agreement(self):
+        """Strategies with weight below threshold should not count
+        toward min_agreement, so regime-suppressed strategies
+        cannot block trades."""
+        signals = [
+            Signal(
+                symbol="BTC/USDT", direction="BUY",
+                confidence=0.7, strategy_name="ema", reason="crossover",
+            ),
+            Signal(
+                symbol="BTC/USDT", direction="HOLD",
+                confidence=0.0, strategy_name="rsi", reason="neutral",
+            ),
+            Signal(
+                symbol="BTC/USDT", direction="HOLD",
+                confidence=0.0, strategy_name="macd", reason="neutral",
+            ),
+        ]
+        weights = {"ema": 1.5, "rsi": 0.2, "macd": 0.2}
+        result = TradingEngine._aggregate_signals(
+            signals, weights=weights, min_agreement=1,
+        )
+        assert result.direction == "BUY"
+
+    def test_min_agreement_2_with_one_significant(self):
+        """With 2 BUY signals but only 1 above weight threshold,
+        min_agreement=2 should block the trade."""
+        signals = [
+            Signal(
+                symbol="BTC/USDT", direction="BUY",
+                confidence=0.7, strategy_name="ema", reason="crossover",
+            ),
+            Signal(
+                symbol="BTC/USDT", direction="BUY",
+                confidence=0.6, strategy_name="rsi", reason="oversold",
+            ),
+        ]
+        weights = {"ema": 1.5, "rsi": 0.1}
+        result = TradingEngine._aggregate_signals(
+            signals, weights=weights, min_agreement=2,
+        )
+        assert result.direction == "HOLD"
+        assert "need 2" in result.reason
+
+    def test_min_agreement_2_with_two_significant(self):
+        """With 2 BUY signals both above weight threshold,
+        min_agreement=2 should allow the trade."""
+        signals = [
+            Signal(
+                symbol="BTC/USDT", direction="BUY",
+                confidence=0.7, strategy_name="ema", reason="crossover",
+            ),
+            Signal(
+                symbol="BTC/USDT", direction="BUY",
+                confidence=0.6, strategy_name="rsi", reason="oversold",
+            ),
+        ]
+        weights = {"ema": 1.5, "rsi": 1.2}
+        result = TradingEngine._aggregate_signals(
+            signals, weights=weights, min_agreement=2,
+        )
+        assert result.direction == "BUY"
+
+    def test_no_weights_all_count(self):
+        """Without explicit weights, all strategies default to 1.0
+        and should count toward agreement (backward compat)."""
+        signals = [
+            Signal(
+                symbol="BTC/USDT", direction="BUY",
+                confidence=0.6, strategy_name="rsi", reason="oversold",
+            ),
+            Signal(
+                symbol="BTC/USDT", direction="HOLD",
+                confidence=0.0, strategy_name="macd", reason="neutral",
+            ),
+        ]
+        result = TradingEngine._aggregate_signals(
+            signals, min_agreement=1,
+        )
+        assert result.direction == "BUY"
+
+
 class TestHoldOpposition:
     def test_hold_opposition_blocks_weak_signal(self):
         signals = [
