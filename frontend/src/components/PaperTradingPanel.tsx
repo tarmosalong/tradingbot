@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import type { BotConfig, BotStatus, BotRunnerState } from '../api';
 
@@ -179,6 +179,7 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
   const [msg, setMsg] = useState<string | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const syncedRef = useRef(false);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -204,22 +205,21 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
     return () => clearInterval(t);
   }, [fetchStatus]);
 
-  useEffect(() => {
-    if (!config) return;
-    setBalance(String(config.paper_trading?.initial_balance_usdt ?? 10_000));
-    setPairs(config.pairs.join(', '));
-    setTimeframe(config.timeframe);
-    setPollSec(String(config.poll_interval));
+  const syncFromConfig = useCallback((c: BotConfig) => {
+    setBalance(String(c.paper_trading?.initial_balance_usdt ?? 10_000));
+    setPairs(c.pairs.join(', '));
+    setTimeframe(c.timeframe);
+    setPollSec(String(c.poll_interval));
 
     const next = new Set<string>();
-    for (const s of config.strategies) {
+    for (const s of c.strategies) {
       if ((BUILDABLE_STRATEGIES as readonly string[]).includes(s)) next.add(s);
     }
     if (next.size === 0) next.add('rsi');
     setSelected(next);
 
-    if (config.strategy_params) {
-      const { rsi, macd, bollinger } = config.strategy_params;
+    if (c.strategy_params) {
+      const { rsi, macd, bollinger } = c.strategy_params;
       setRsiPeriod(rsi.period);
       setRsiOversold(rsi.oversold);
       setRsiOverbought(rsi.overbought);
@@ -230,7 +230,7 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
       setBollStdDev(bollinger.std_dev);
     }
 
-    const r = config.risk;
+    const r = c.risk;
     setRiskMaxPos(Math.round(r.max_position_pct * 100));
     setRiskStopLoss(Math.round(r.stop_loss_pct * 100));
     setRiskTrailingStop(Math.round(r.trailing_stop_pct * 100));
@@ -242,7 +242,13 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
     setRiskMaxDataAge(r.max_data_age_seconds);
     setRiskMaxPriceDeviation(Math.round(r.max_price_deviation_pct * 100));
     setRiskCircuitBreaker(r.circuit_breaker_threshold);
-  }, [config]);
+  }, []);
+
+  useEffect(() => {
+    if (!config || syncedRef.current) return;
+    syncedRef.current = true;
+    syncFromConfig(config);
+  }, [config, syncFromConfig]);
 
   const state: BotRunnerState | null = status?.state ?? null;
   const canControl = status?.control_enabled !== false;
@@ -317,6 +323,8 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
       });
       setMsg('Settings saved to config.yaml.');
       onConfigRefresh();
+      const fresh = await api.config();
+      syncFromConfig(fresh);
     } catch (e) {
       setMsg(e instanceof Error ? e.message : 'Save failed');
     } finally {
