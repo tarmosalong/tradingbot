@@ -48,15 +48,15 @@ export function ConfigPanel({ config }: ConfigPanelProps) {
   const isPaper = config.mode === 'paper';
 
   return (
-    <div className="bg-[var(--bg-card)] rounded-lg border border-[var(--border)] space-y-4">
+    <div className="bg-[var(--bg-card)]/80 backdrop-blur-sm rounded-xl border border-[var(--border)] space-y-4">
       <div className="px-4 py-3 border-b border-[var(--border)]">
         <h2 className="text-sm font-medium">Bot Configuration</h2>
         <p className="text-[11px] text-[var(--text-secondary)]">Current settings and risk limits</p>
       </div>
 
       {isPaper && (
-        <div className="mx-4 -mt-2 rounded-lg border border-[var(--accent-blue)]/35 bg-[var(--accent-blue)]/5 px-3 py-3 text-sm">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--accent-blue)] mb-1">
+        <div className="mx-4 -mt-2 rounded-lg border border-[var(--accent)]/35 bg-[var(--accent)]/5 px-3 py-3 text-sm">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--accent)] mb-1">
             Paper mode active
           </h3>
           <p className="text-[var(--text-secondary)] text-xs leading-relaxed">

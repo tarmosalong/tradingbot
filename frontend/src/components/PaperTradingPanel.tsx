@@ -162,7 +162,7 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
   }
 
   return (
-    <div className="bg-[var(--bg-card)] rounded-lg border border-[var(--border)] mb-4 overflow-hidden">
+    <div className="bg-[var(--bg-card)]/80 backdrop-blur-sm rounded-xl border border-[var(--border)] mb-4 overflow-hidden">
       <div className="px-4 py-3 border-b border-[var(--border)] flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="text-sm font-medium">Paper Trading</h2>
@@ -219,7 +219,7 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
           <p className={`text-xs ${msg.includes('saved') ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'}`}>{msg}</p>
         )}
 
-        <p className="text-xs text-[var(--text-secondary)] leading-relaxed bg-[var(--accent-blue)]/5 border border-[var(--accent-blue)]/20 rounded-lg px-3 py-2">
+        <p className="text-xs text-[var(--text-secondary)] leading-relaxed bg-[var(--accent)]/5 border border-[var(--accent)]/20 rounded-lg px-3 py-2">
           <strong className="text-[var(--text-primary)]">How it works:</strong> Press Start to begin simulated trading.
           The bot will analyse the market using your chosen strategies and make virtual trades.
           Settings can only be changed when the bot is stopped.
@@ -312,7 +312,7 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
           type="button"
           onClick={() => void handleSave()}
           disabled={busy || !stopped || botApiUnavailable}
-          className="w-full py-2.5 rounded-md border border-[var(--accent-blue)]/40 bg-[var(--accent-blue)]/10 text-sm font-medium text-[var(--accent-blue)] hover:bg-[var(--accent-blue)]/20 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed transition-colors"
+          className="w-full py-2.5 rounded-md border border-[var(--accent)]/40 bg-[var(--accent)]/10 text-sm font-medium text-[var(--accent)] hover:bg-[var(--accent)]/20 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed transition-colors"
         >
           Save Settings
         </button>

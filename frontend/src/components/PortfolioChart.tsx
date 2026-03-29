@@ -29,7 +29,7 @@ export function PortfolioChart({ data }: PortfolioChartProps) {
   const isUp = values.length > 1 && values[values.length - 1] >= values[0];
 
   return (
-    <div className="bg-[var(--bg-card)] rounded-lg p-4 border border-[var(--border)]">
+    <div className="bg-[var(--bg-card)]/80 backdrop-blur-sm rounded-xl p-4 border border-[var(--border)]">
       <h2 className="text-sm font-medium text-[var(--text-secondary)] mb-3">
         Portfolio Value
       </h2>

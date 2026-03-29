@@ -145,7 +145,7 @@ function ConfidenceGauge({ value, size = 'md' }: { value: number; size?: 'sm' | 
           className={`${h} rounded-full transition-all duration-500`}
           style={{
             width: `${Math.max(pct, 2)}%`,
-            backgroundColor: pct >= 60 ? 'var(--accent-green)' : pct >= 30 ? 'var(--accent-blue)' : 'var(--text-secondary)',
+            backgroundColor: pct >= 60 ? 'var(--accent-green)' : pct >= 30 ? 'var(--accent)' : 'var(--text-secondary)',
           }}
         />
       </div>
@@ -204,8 +204,8 @@ function ConfidenceTimeline({ history }: { history: SignalEntry[] }) {
         <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
           <defs>
             <linearGradient id="confGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="var(--accent-blue)" stopOpacity={0.35} />
-              <stop offset="100%" stopColor="var(--accent-blue)" stopOpacity={0} />
+              <stop offset="0%" stopColor="var(--accent)" stopOpacity={0.35} />
+              <stop offset="100%" stopColor="var(--accent)" stopOpacity={0} />
             </linearGradient>
           </defs>
           <XAxis dataKey="time" tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} axisLine={false} tickLine={false} />
@@ -221,7 +221,7 @@ function ConfidenceTimeline({ history }: { history: SignalEntry[] }) {
             labelFormatter={(l: unknown) => String(l ?? '')}
           />
           <Area
-            type="monotone" dataKey="confidence" stroke="var(--accent-blue)" fill="url(#confGrad)" strokeWidth={2}
+            type="monotone" dataKey="confidence" stroke="var(--accent)" fill="url(#confGrad)" strokeWidth={2}
             dot={(props: unknown) => {
               const p = props as { cx?: number; cy?: number; payload?: ChartPoint; index?: number };
               return (
@@ -320,7 +320,7 @@ function StrategyCard({ s }: { s: SignalEntry }) {
             <div className="space-y-1">
               {indicators.map(([k, v]) => (
                 <div key={k} className="text-[11px] text-[var(--text-secondary)] flex items-center gap-2">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-blue)] shrink-0" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] shrink-0" />
                   {indicatorExplain(k, v)}
                 </div>
               ))}
@@ -387,7 +387,7 @@ export function SignalsPanel({ refreshTrigger }: SignalsPanelProps) {
   }
 
   return (
-    <div className="bg-[var(--bg-card)] rounded-lg border border-[var(--border)]">
+    <div className="bg-[var(--bg-card)]/80 backdrop-blur-sm rounded-xl border border-[var(--border)]">
       <div className="px-4 py-3 border-b border-[var(--border)] flex items-center gap-2">
         <h2 className="text-sm font-medium">Market Analysis</h2>
         <InfoTooltip text="Each trading pair is analysed every cycle by multiple strategies (Momentum, Trend, Volatility). Click a pair to see detailed breakdowns and charts." />

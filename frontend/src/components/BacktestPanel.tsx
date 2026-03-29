@@ -361,7 +361,7 @@ export function BacktestPanel() {
                   onClick={() => toggleStrategy(s.id)}
                   className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all cursor-pointer border ${
                     active
-                      ? 'bg-[var(--accent-blue)]/15 border-[var(--accent-blue)] text-[var(--accent-blue)]'
+                      ? 'bg-[var(--accent)]/15 border-[var(--accent)] text-[var(--accent)]'
                       : 'bg-[var(--bg-secondary)] border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--text-secondary)]'
                   }`}
                   title={s.description}
@@ -382,9 +382,9 @@ export function BacktestPanel() {
                 type="checkbox"
                 checked={aiEnabled}
                 onChange={(e) => setAiEnabled(e.target.checked)}
-                className="w-4 h-4 rounded accent-[var(--accent-purple,#a855f7)] cursor-pointer"
+                className="w-4 h-4 rounded accent-[var(--accent-warm)] cursor-pointer"
               />
-              <span className="text-sm font-medium text-[var(--accent-purple,#a855f7)] border-b border-dotted border-[var(--accent-purple,#a855f7)]/40 cursor-help">
+              <span className="text-sm font-medium text-[var(--accent-warm)] border-b border-dotted border-[var(--accent-warm)]/40 cursor-help">
                 AI Crash Filter
               </span>
             </label>
@@ -398,9 +398,9 @@ export function BacktestPanel() {
                   step={0.05}
                   value={aiStrength}
                   onChange={(e) => setAiStrength(Number(e.target.value))}
-                  className="w-24 h-1.5 rounded-full appearance-none cursor-pointer accent-[var(--accent-purple,#a855f7)] bg-[var(--bg-secondary)]"
+                  className="w-24 h-1.5 rounded-full appearance-none cursor-pointer accent-[var(--accent-warm)] bg-[var(--bg-secondary)]"
                 />
-                <span className="text-xs font-mono text-[var(--accent-purple,#a855f7)]">{aiStrength.toFixed(2)}</span>
+                <span className="text-xs font-mono text-[var(--accent-warm)]">{aiStrength.toFixed(2)}</span>
               </div>
             )}
           </div>
@@ -419,7 +419,7 @@ export function BacktestPanel() {
           <div className="mt-3 space-y-4 border-t border-[var(--border)] pt-4">
             {enabledStrategies.has('rsi') && (
               <div>
-                <h3 className="text-xs font-medium text-[var(--accent-blue)] mb-2">RSI Parameters</h3>
+                <h3 className="text-xs font-medium text-[var(--accent)] mb-2">RSI Parameters</h3>
                 <div className="grid grid-cols-3 gap-3">
                   <ParamInput label="Period" value={rsiPeriod} onChange={setRsiPeriod} min={2} max={50} tooltip="Number of candles used to calculate RSI. Lower = more sensitive, higher = smoother. Default: 14" />
                   <ParamInput label="Oversold" value={rsiOversold} onChange={setRsiOversold} min={5} max={45} tooltip="RSI level below which the asset is considered oversold (BUY signal). Typical range: 20–35. Default: 30" />
@@ -430,7 +430,7 @@ export function BacktestPanel() {
 
             {enabledStrategies.has('macd') && (
               <div>
-                <h3 className="text-xs font-medium text-[var(--accent-blue)] mb-2">MACD Parameters</h3>
+                <h3 className="text-xs font-medium text-[var(--accent)] mb-2">MACD Parameters</h3>
                 <div className="grid grid-cols-3 gap-3">
                   <ParamInput label="Fast EMA" value={macdFast} onChange={setMacdFast} min={2} max={50} tooltip="Period for the fast Exponential Moving Average. Shorter period reacts faster to price changes. Default: 12" />
                   <ParamInput label="Slow EMA" value={macdSlow} onChange={setMacdSlow} min={10} max={100} tooltip="Period for the slow Exponential Moving Average. Longer period smooths out noise. Must be larger than fast EMA. Default: 26" />
@@ -441,7 +441,7 @@ export function BacktestPanel() {
 
             {enabledStrategies.has('bollinger') && (
               <div>
-                <h3 className="text-xs font-medium text-[var(--accent-blue)] mb-2">Bollinger Bands Parameters</h3>
+                <h3 className="text-xs font-medium text-[var(--accent)] mb-2">Bollinger Bands Parameters</h3>
                 <div className="grid grid-cols-2 gap-3">
                   <ParamInput label="Period" value={bollPeriod} onChange={setBollPeriod} min={5} max={50} tooltip="Number of candles for the moving average that forms the middle band. Lower = tighter bands, higher = smoother. Default: 20" />
                   <ParamInput label="Std Dev" value={bollStdDev} onChange={setBollStdDev} min={0.5} max={4} step={0.1} tooltip="Number of standard deviations for the upper/lower bands. Higher = wider bands = fewer signals. Typical range: 1.5–2.5. Default: 2.0" />
@@ -451,7 +451,7 @@ export function BacktestPanel() {
 
             {aiEnabled && (
               <div>
-                <h3 className="text-xs font-medium text-[var(--accent-purple,#a855f7)] mb-2">AI Crash Filter Parameters</h3>
+                <h3 className="text-xs font-medium text-[var(--accent-warm)] mb-2">AI Crash Filter Parameters</h3>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                   <ParamInput label="Crash Lookback" value={aiCrashLookback} onChange={setAiCrashLookback} min={3} max={30} tooltip="Number of candles to look back when detecting a price crash. Lower = more sensitive to short-term drops. Default: 10" />
                   <ParamInput label="Crash Threshold %" value={aiCrashThreshold} onChange={setAiCrashThreshold} min={-20} max={-1} tooltip="Price drop percentage that triggers crash detection. E.g. -5 means a 5% drop over the lookback period is flagged as a crash. Default: -5%" />
@@ -494,10 +494,10 @@ export function BacktestPanel() {
             </div>
 
             <div>
-              <h3 className="text-xs font-medium text-[var(--accent-blue)] mb-2">Walk-Forward Validation</h3>
+              <h3 className="text-xs font-medium text-[var(--accent)] mb-2">Walk-Forward Validation</h3>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <div className="flex items-center gap-2" title="Split the data into sequential train/test folds to detect overfitting. Shows how the strategy performs on unseen data.">
-                  <input type="checkbox" checked={wfEnabled} onChange={(e) => setWfEnabled(e.target.checked)} className="w-4 h-4 rounded accent-[var(--accent-blue)] cursor-pointer" />
+                  <input type="checkbox" checked={wfEnabled} onChange={(e) => setWfEnabled(e.target.checked)} className="w-4 h-4 rounded accent-[var(--accent)] cursor-pointer" />
                   <span className="text-xs text-[var(--text-secondary)] border-b border-dotted border-[var(--text-secondary)]/40 cursor-help">Enable</span>
                 </div>
                 {wfEnabled && (
@@ -532,7 +532,7 @@ export function BacktestPanel() {
           <button
             onClick={runBacktest}
             disabled={loading}
-            className="px-4 py-2 bg-[var(--accent-blue)] text-white rounded text-sm font-medium hover:opacity-90 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+            className="px-4 py-2 bg-[var(--accent)] text-white rounded text-sm font-medium hover:opacity-90 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
           >
             {loading ? 'Running...' : 'Run Backtest'}
           </button>
@@ -712,8 +712,8 @@ export function BacktestPanel() {
 
           {/* AI Filter stats */}
           {result.report.ai_filter_stats && result.report.ai_filter_stats.signals_reviewed > 0 && (
-            <div className="bg-[var(--bg-card)] rounded-lg p-4 border border-[var(--accent-purple,#a855f7)]/30">
-              <h2 className="text-sm font-medium text-[var(--accent-purple,#a855f7)] mb-3">
+            <div className="bg-[var(--bg-card)] rounded-lg p-4 border border-[var(--accent-warm)]/30">
+              <h2 className="text-sm font-medium text-[var(--accent-warm)] mb-3">
                 AI Crash Filter Results
               </h2>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -792,8 +792,8 @@ export function BacktestPanel() {
 
           {/* Walk-forward results */}
           {result.walk_forward && result.walk_forward.folds.length > 0 && (
-            <div className="bg-[var(--bg-card)] rounded-lg p-4 border border-[var(--accent-blue)]/30">
-              <h2 className="text-sm font-medium text-[var(--accent-blue)] mb-3">
+            <div className="bg-[var(--bg-card)] rounded-lg p-4 border border-[var(--accent)]/30">
+              <h2 className="text-sm font-medium text-[var(--accent)] mb-3">
                 Walk-Forward Validation ({result.walk_forward.aggregate_oos.n_folds} folds)
               </h2>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
@@ -973,7 +973,7 @@ function ParamInput({
         step={step}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full h-1.5 rounded-full appearance-none cursor-pointer accent-[var(--accent-blue)] bg-[var(--bg-secondary)]"
+        className="w-full h-1.5 rounded-full appearance-none cursor-pointer accent-[var(--accent)] bg-[var(--bg-secondary)]"
       />
     </div>
   );

@@ -6,7 +6,7 @@ interface TradesTableProps {
 
 export function TradesTable({ trades }: TradesTableProps) {
   return (
-    <div className="bg-[var(--bg-card)] rounded-lg border border-[var(--border)] overflow-hidden">
+    <div className="bg-[var(--bg-card)]/80 backdrop-blur-sm rounded-xl border border-[var(--border)] overflow-hidden">
       <div className="px-4 py-3 border-b border-[var(--border)]">
         <h2 className="text-sm font-medium text-[var(--text-secondary)]">Recent Trades</h2>
       </div>

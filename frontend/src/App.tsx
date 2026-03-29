@@ -54,7 +54,7 @@ function App() {
   const signalTrigger = lastMessage?.type === 'signal' ? lastMessage : null;
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen flex flex-col bg-gradient-to-br from-[var(--bg-primary)] via-[var(--bg-primary)] to-[#12101a]">
       <Header mode={config?.mode ?? '...'} connected={connected} />
 
       <nav className="flex gap-1 px-6 pt-4 pb-2">
@@ -68,7 +68,7 @@ function App() {
 
       <main className="flex-1 p-6 pt-2 max-w-7xl mx-auto w-full space-y-6">
         {error && tab === 'dashboard' && (
-          <div className="bg-[var(--accent-red)]/10 border border-[var(--accent-red)]/30 rounded-lg px-4 py-3 text-sm text-[var(--accent-red)]">
+          <div className="bg-[var(--accent-red)]/10 border border-[var(--accent-red)]/30 rounded-xl px-4 py-3 text-sm text-[var(--accent-red)]">
             {error}
           </div>
         )}
@@ -114,10 +114,10 @@ function TabButton({
   return (
     <button
       onClick={onClick}
-      className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors cursor-pointer ${
+      className={`px-4 py-2 text-sm font-medium rounded-lg transition-all cursor-pointer ${
         active
-          ? 'bg-[var(--bg-card)] text-[var(--text-primary)] border border-b-0 border-[var(--border)]'
-          : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+          ? 'bg-[var(--bg-card)] text-[var(--accent)] shadow-sm shadow-[var(--accent)]/10 border border-[var(--border)]'
+          : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-secondary)]'
       }`}
     >
       {children}

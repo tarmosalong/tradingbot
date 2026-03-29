@@ -40,7 +40,7 @@ function StatCard({
   tip: string;
 }) {
   return (
-    <div className="bg-[var(--bg-card)] rounded-lg p-4 border border-[var(--border)]">
+    <div className="bg-[var(--bg-card)]/80 backdrop-blur-sm rounded-xl p-4 border border-[var(--border)] hover:border-[var(--accent)]/20 transition-colors">
       <p className="text-xs font-medium text-[var(--text-secondary)] mb-1 flex items-center">
         {label}
         <InfoTooltip text={tip} />

@@ -15,11 +15,11 @@ export function Header({ mode, connected }: HeaderProps) {
   const tip = MODE_TIPS[mode] ?? `Mode: ${mode}`;
 
   return (
-    <header className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)] bg-[var(--bg-secondary)]">
+    <header className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)] bg-[var(--bg-secondary)]/80 backdrop-blur-sm">
       <div className="flex items-center gap-3">
         <h1 className="text-xl font-bold tracking-tight">Trading Bot</h1>
         <span
-          className="relative px-2 py-0.5 text-xs font-medium rounded bg-[var(--accent-blue)]/20 text-[var(--accent-blue)] uppercase cursor-help"
+          className="relative px-2 py-0.5 text-xs font-medium rounded bg-[var(--accent)]/20 text-[var(--accent)] uppercase cursor-help"
           onMouseEnter={() => setTipOpen(true)}
           onMouseLeave={() => setTipOpen(false)}
         >
