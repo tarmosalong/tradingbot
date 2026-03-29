@@ -1,4 +1,4 @@
-"""Technical analysis strategies: RSI, MACD, Bollinger Bands.
+"""Technical analysis strategies: RSI, MACD, Bollinger Bands, EMA Crossover.
 
 Each receives OHLCV data, computes indicators via pandas-ta, and
 returns a Signal with direction, confidence, and supporting data.
@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 import pandas as pd
 import pandas_ta as ta
 
-from backend.config import BollingerConfig, MACDConfig, RSIConfig
+from backend.config import BollingerConfig, EMAConfig, MACDConfig, RSIConfig
 from backend.models import Signal
 from backend.strategies.base import StrategyBase
 
@@ -282,6 +282,117 @@ class BollingerStrategy(StrategyBase):
             confidence=round(warmth, 3),
             strategy_name=self.name,
             reason=reason,
+            indicators=indicators,
+            timestamp=datetime.now(UTC),
+        )
+
+    def _hold(self, symbol: str, reason: str) -> Signal:
+        return Signal(
+            symbol=symbol,
+            direction="HOLD",
+            confidence=0.0,
+            strategy_name=self.name,
+            reason=reason,
+            timestamp=datetime.now(UTC),
+        )
+
+
+class EMAStrategy(StrategyBase):
+    """EMA Crossover: fast EMA crosses above slow -> BUY, below -> SELL.
+
+    Trend-following strategy that complements the mean-reversion
+    strategies (RSI, MACD, Bollinger).
+    """
+
+    name = "ema"
+
+    def __init__(self, config: EMAConfig | None = None) -> None:
+        self._cfg = config or EMAConfig()
+
+    async def analyze(self, symbol: str, ohlcv: pd.DataFrame) -> Signal:
+        needed = max(self._cfg.slow_period + 2, MIN_ROWS)
+        if len(ohlcv) < needed:
+            return self._hold(symbol, "Insufficient data for EMA")
+
+        close = ohlcv["close"]
+        fast = close.ewm(span=self._cfg.fast_period, adjust=False).mean()
+        slow = close.ewm(span=self._cfg.slow_period, adjust=False).mean()
+
+        cur_fast = float(fast.iloc[-1])
+        cur_slow = float(slow.iloc[-1])
+        prev_fast = float(fast.iloc[-2])
+        prev_slow = float(slow.iloc[-2])
+
+        if pd.isna(cur_fast) or pd.isna(cur_slow):
+            return self._hold(symbol, "EMA values are NaN")
+
+        gap = cur_fast - cur_slow
+        atr_series = ta.atr(
+            ohlcv["high"], ohlcv["low"], close, length=14,
+        )
+        atr = float(atr_series.iloc[-1]) if (
+            atr_series is not None
+            and not atr_series.empty
+            and not pd.isna(atr_series.iloc[-1])
+        ) else abs(gap) + 1.0
+
+        norm_gap = abs(gap) / atr if atr > 0 else 0.0
+
+        indicators = {
+            "ema_fast": cur_fast,
+            "ema_slow": cur_slow,
+            "ema_gap": gap,
+            "ema_gap_atr": round(norm_gap, 4),
+        }
+
+        bullish_cross = prev_fast <= prev_slow and cur_fast > cur_slow
+        bearish_cross = prev_fast >= prev_slow and cur_fast < cur_slow
+
+        if bullish_cross:
+            confidence = min(0.5 + norm_gap * 0.5, 1.0)
+            return Signal(
+                symbol=symbol,
+                direction="BUY",
+                confidence=confidence,
+                strategy_name=self.name,
+                reason=(
+                    f"EMA bullish crossover "
+                    f"(fast {cur_fast:.2f} > slow {cur_slow:.2f})"
+                ),
+                indicators=indicators,
+                timestamp=datetime.now(UTC),
+            )
+
+        if bearish_cross:
+            confidence = min(0.5 + norm_gap * 0.5, 1.0)
+            return Signal(
+                symbol=symbol,
+                direction="SELL",
+                confidence=confidence,
+                strategy_name=self.name,
+                reason=(
+                    f"EMA bearish crossover "
+                    f"(fast {cur_fast:.2f} < slow {cur_slow:.2f})"
+                ),
+                indicators=indicators,
+                timestamp=datetime.now(UTC),
+            )
+
+        converging = abs(gap) < abs(prev_fast - prev_slow)
+        warmth = min(norm_gap * 0.3, 0.45) if converging else 0.0
+
+        side = "buy" if cur_fast < cur_slow else "sell"
+        trend = "converging" if converging else "diverging"
+
+        return Signal(
+            symbol=symbol,
+            direction="HOLD",
+            confidence=round(warmth, 3),
+            strategy_name=self.name,
+            reason=(
+                f"EMA {trend} toward {side} "
+                f"(gap {gap:.2f}, {norm_gap:.2f} ATR)"
+            ),
             indicators=indicators,
             timestamp=datetime.now(UTC),
         )

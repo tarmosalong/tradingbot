@@ -147,6 +147,11 @@ class BollingerParams(BaseModel):
     std_dev: float = 2.0
 
 
+class EMAParams(BaseModel):
+    fast_period: int = 9
+    slow_period: int = 21
+
+
 class RiskParams(BaseModel):
     max_position_pct: float = 0.10
     stop_loss_pct: float = 0.03
@@ -205,10 +210,13 @@ class BacktestRequest(BaseModel):
     rsi: RSIParams = RSIParams()
     macd: MACDParams = MACDParams()
     bollinger: BollingerParams = BollingerParams()
+    ema: EMAParams = EMAParams()
     risk: RiskParams = RiskParams()
     ai_filter: AIFilterParams = AIFilterParams()
     engine: EngineParams = EngineParams()
     walk_forward: WalkForwardParams = WalkForwardParams()
+    min_agreement: int = 1
+    hold_opposition: float = 0.0
 
 
 @router.post("/backtest")
@@ -252,6 +260,8 @@ async def run_backtest(req: BacktestRequest):
         slippage_rate=req.engine.slippage_rate,
     )
 
+    from backend.config import EMAConfig
+
     config_map: dict = {
         "rsi": RSIConfig(
             period=req.rsi.period,
@@ -266,6 +276,10 @@ async def run_backtest(req: BacktestRequest):
         "bollinger": BollingerConfig(
             period=req.bollinger.period,
             std_dev=req.bollinger.std_dev,
+        ),
+        "ema": EMAConfig(
+            fast_period=req.ema.fast_period,
+            slow_period=req.ema.slow_period,
         ),
     }
     strats = []
@@ -328,6 +342,8 @@ async def run_backtest(req: BacktestRequest):
         ai_filter_config=ai_config,
         engine_config=engine_cfg,
         strategy_weights=req.strategy_weights or None,
+        min_agreement=req.min_agreement,
+        hold_opposition=req.hold_opposition,
     )
 
     result = await engine.run()
@@ -386,6 +402,8 @@ async def run_backtest(req: BacktestRequest):
             fee_rate=req.engine.fee_rate,
             slippage_rate=req.engine.slippage_rate,
             strategy_weights=req.strategy_weights or None,
+            min_agreement=req.min_agreement,
+            hold_opposition=req.hold_opposition,
         )
         response["walk_forward"] = wf_result.to_dict()
 

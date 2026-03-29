@@ -45,12 +45,21 @@ class BollingerConfig:
 
 
 @dataclass(frozen=True)
+class EMAConfig:
+    fast_period: int = 9
+    slow_period: int = 21
+
+
+@dataclass(frozen=True)
 class StrategiesConfig:
     enabled: list[str] = field(default_factory=lambda: ["rsi", "macd", "bollinger"])
     rsi: RSIConfig = field(default_factory=RSIConfig)
     macd: MACDConfig = field(default_factory=MACDConfig)
     bollinger: BollingerConfig = field(default_factory=BollingerConfig)
+    ema: EMAConfig = field(default_factory=EMAConfig)
     weights: dict[str, float] = field(default_factory=dict)
+    min_agreement: int = 1
+    hold_opposition: float = 0.0
 
 
 @dataclass(frozen=True)

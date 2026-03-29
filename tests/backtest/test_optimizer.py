@@ -39,21 +39,37 @@ class TestBuildConfigs:
             "stop_loss_pct": 0.05,
             "atr_stop_multiplier": 2.5,
         }
-        strats, risk, engine, fee, slip = _build_configs_from_params(
+        built = _build_configs_from_params(
             params, ["rsi", "macd"], 0.001, 0.0005,
         )
-        assert len(strats) == 2
-        assert risk.stop_loss_pct == 0.05
-        assert risk.atr_stop_multiplier == 2.5
-        assert fee == 0.001
+        assert len(built.strategies) == 2
+        assert built.risk.stop_loss_pct == 0.05
+        assert built.risk.atr_stop_multiplier == 2.5
+        assert built.fee == 0.001
 
     def test_uses_defaults_for_missing_params(self):
-        strats, risk, engine, _, _ = _build_configs_from_params(
+        built = _build_configs_from_params(
             {}, ["rsi"], 0.001, 0.0005,
         )
-        assert len(strats) == 1
-        assert risk.max_position_pct == 0.10
-        assert risk.stop_loss_pct == 0.03
+        assert len(built.strategies) == 1
+        assert built.risk.max_position_pct == 0.10
+        assert built.risk.stop_loss_pct == 0.03
+
+    def test_builds_ema_strategy(self):
+        built = _build_configs_from_params(
+            {"ema_fast_period": 7, "ema_slow_period": 25},
+            ["ema"], 0.001, 0.0005,
+        )
+        assert len(built.strategies) == 1
+        assert built.strategies[0].name == "ema"
+
+    def test_aggregator_params(self):
+        built = _build_configs_from_params(
+            {"min_agreement": 3, "hold_opposition": 0.2},
+            ["rsi"], 0.001, 0.0005,
+        )
+        assert built.min_agreement == 3
+        assert built.hold_opposition == 0.2
 
 
 class TestRunOptimization:

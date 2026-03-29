@@ -99,6 +99,8 @@ class BacktestEngine:
         ai_filter_config: AIFilterConfig | None = None,
         engine_config: EngineConfig | None = None,
         strategy_weights: dict[str, float] | None = None,
+        min_agreement: int = 1,
+        hold_opposition: float = 0.0,
     ) -> None:
         self._exchange = exchange
         self._strategies = strategies
@@ -107,6 +109,8 @@ class BacktestEngine:
         self._ai_filter = AISimulationFilter(ai_filter_config)
         self._cfg = engine_config or EngineConfig()
         self._strategy_weights = strategy_weights
+        self._min_agreement = min_agreement
+        self._hold_opposition = hold_opposition
 
         self._position: Position | None = None
         self._last_trade_index = -999
@@ -207,7 +211,10 @@ class BacktestEngine:
 
                 if signals:
                     combined = TradingEngine._aggregate_signals(
-                        signals, self._strategy_weights,
+                        signals,
+                        self._strategy_weights,
+                        min_agreement=self._min_agreement,
+                        hold_opposition=self._hold_opposition,
                     )
                     combined = self._ai_filter.evaluate(combined, ohlcv)
                     result.signals.append(combined)

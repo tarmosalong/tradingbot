@@ -114,6 +114,11 @@ const AVAILABLE_STRATEGIES = [
     label: 'Bollinger',
     description: 'Bollinger Bands – Volatility-based bands around a moving average. Generates BUY when price drops below lower band (oversold), SELL when price rises above upper band (overbought).',
   },
+  {
+    id: 'ema',
+    label: 'EMA Crossover',
+    description: 'Trend-following strategy using fast/slow EMA crossovers. BUY when fast crosses above slow, SELL when below. Complements mean-reversion strategies.',
+  },
 ] as const;
 
 const POPULAR_SYMBOLS = [
@@ -128,6 +133,8 @@ interface BacktestProfile {
   rsi: { period: number; oversold: number; overbought: number };
   macd: { fast: number; slow: number; signal: number };
   bollinger: { period: number; std_dev: number };
+  ema: { fastPeriod: number; slowPeriod: number };
+  signal: { minAgreement: number; holdOpposition: number };
   risk: {
     maxPos: number;
     stopLoss: number;
@@ -162,6 +169,8 @@ const PROFILES: Record<string, BacktestProfile> = {
     rsi: { period: 14, oversold: 25, overbought: 75 },
     macd: { fast: 12, slow: 26, signal: 9 },
     bollinger: { period: 20, std_dev: 2.5 },
+    ema: { fastPeriod: 9, slowPeriod: 21 },
+    signal: { minAgreement: 3, holdOpposition: 0.15 },
     risk: {
       maxPos: 5, stopLoss: 5, trailingStop: 3, maxDrawdown: 10,
       dailyLoss: 3, maxOrder: 500, minConfidence: 60,
@@ -178,6 +187,8 @@ const PROFILES: Record<string, BacktestProfile> = {
     rsi: { period: 14, oversold: 30, overbought: 70 },
     macd: { fast: 12, slow: 26, signal: 9 },
     bollinger: { period: 20, std_dev: 2.0 },
+    ema: { fastPeriod: 9, slowPeriod: 21 },
+    signal: { minAgreement: 2, holdOpposition: 0.1 },
     risk: {
       maxPos: 10, stopLoss: 3, trailingStop: 2, maxDrawdown: 15,
       dailyLoss: 5, maxOrder: 1000, minConfidence: 40,
@@ -194,6 +205,8 @@ const PROFILES: Record<string, BacktestProfile> = {
     rsi: { period: 10, oversold: 35, overbought: 65 },
     macd: { fast: 8, slow: 21, signal: 5 },
     bollinger: { period: 15, std_dev: 1.5 },
+    ema: { fastPeriod: 5, slowPeriod: 15 },
+    signal: { minAgreement: 1, holdOpposition: 0.0 },
     risk: {
       maxPos: 20, stopLoss: 2, trailingStop: 1, maxDrawdown: 30,
       dailyLoss: 10, maxOrder: 3000, minConfidence: 25,
@@ -210,6 +223,8 @@ const PROFILES: Record<string, BacktestProfile> = {
     rsi: { period: 7, oversold: 35, overbought: 65 },
     macd: { fast: 5, slow: 13, signal: 4 },
     bollinger: { period: 10, std_dev: 1.5 },
+    ema: { fastPeriod: 5, slowPeriod: 12 },
+    signal: { minAgreement: 1, holdOpposition: 0.0 },
     risk: {
       maxPos: 15, stopLoss: 1, trailingStop: 1, maxDrawdown: 15,
       dailyLoss: 5, maxOrder: 2000, minConfidence: 20,
@@ -226,6 +241,8 @@ const PROFILES: Record<string, BacktestProfile> = {
     rsi: { period: 21, oversold: 20, overbought: 80 },
     macd: { fast: 16, slow: 36, signal: 12 },
     bollinger: { period: 30, std_dev: 2.5 },
+    ema: { fastPeriod: 12, slowPeriod: 50 },
+    signal: { minAgreement: 3, holdOpposition: 0.2 },
     risk: {
       maxPos: 10, stopLoss: 8, trailingStop: 5, maxDrawdown: 25,
       dailyLoss: 8, maxOrder: 2000, minConfidence: 50,
@@ -263,6 +280,12 @@ export function BacktestPanel({ optimizedParams, onParamsApplied }: BacktestPane
 
   const [bollPeriod, setBollPeriod] = useState(20);
   const [bollStdDev, setBollStdDev] = useState(2.0);
+
+  const [emaFastPeriod, setEmaFastPeriod] = useState(9);
+  const [emaSlowPeriod, setEmaSlowPeriod] = useState(21);
+
+  const [minAgreement, setMinAgreement] = useState(1);
+  const [holdOpposition, setHoldOpposition] = useState(0.0);
 
   const [riskMaxPos, setRiskMaxPos] = useState(10);
   const [riskStopLoss, setRiskStopLoss] = useState(3);
@@ -332,6 +355,10 @@ export function BacktestPanel({ optimizedParams, onParamsApplied }: BacktestPane
     if (p.ema_trend_enabled != null) setEmaTrendEnabled(p.ema_trend_enabled as boolean);
     if (p.cooldown_candles != null) setCooldownCandles(p.cooldown_candles as number);
     if (p.use_dynamic_sizing != null) setDynamicSizing(p.use_dynamic_sizing as boolean);
+    if (p.ema_fast_period != null) setEmaFastPeriod(p.ema_fast_period as number);
+    if (p.ema_slow_period != null) setEmaSlowPeriod(p.ema_slow_period as number);
+    if (p.min_agreement != null) setMinAgreement(p.min_agreement as number);
+    if (p.hold_opposition != null) setHoldOpposition(p.hold_opposition as number);
     setShowAdvanced(true);
     onParamsApplied?.();
   }, [optimizedParams, onParamsApplied]);
@@ -366,7 +393,11 @@ export function BacktestPanel({ optimizedParams, onParamsApplied }: BacktestPane
         slippageRate === p.engine.slippage &&
         cooldownCandles === p.engine.cooldown &&
         dynamicSizing === p.engine.dynamicSizing &&
-        regimeFilter === p.engine.regimeFilter
+        regimeFilter === p.engine.regimeFilter &&
+        emaFastPeriod === p.ema.fastPeriod &&
+        emaSlowPeriod === p.ema.slowPeriod &&
+        minAgreement === p.signal.minAgreement &&
+        holdOpposition === p.signal.holdOpposition
       ) {
         return id;
       }
@@ -376,6 +407,8 @@ export function BacktestPanel({ optimizedParams, onParamsApplied }: BacktestPane
     rsiPeriod, rsiOversold, rsiOverbought,
     macdFast, macdSlow, macdSignal,
     bollPeriod, bollStdDev,
+    emaFastPeriod, emaSlowPeriod,
+    minAgreement, holdOpposition,
     riskMaxPos, riskStopLoss, riskTrailingStop,
     riskMaxDrawdown, riskDailyLoss, riskMaxOrder, riskMinConfidence,
     atrStopMult, atrTpMult, atrTrailingMult,
@@ -416,6 +449,10 @@ export function BacktestPanel({ optimizedParams, onParamsApplied }: BacktestPane
     setCooldownCandles(p.engine.cooldown);
     setDynamicSizing(p.engine.dynamicSizing);
     setRegimeFilter(p.engine.regimeFilter);
+    setEmaFastPeriod(p.ema.fastPeriod);
+    setEmaSlowPeriod(p.ema.slowPeriod);
+    setMinAgreement(p.signal.minAgreement);
+    setHoldOpposition(p.signal.holdOpposition);
   }
 
   const toggleStrategy = (id: string) => {
@@ -462,6 +499,9 @@ export function BacktestPanel({ optimizedParams, onParamsApplied }: BacktestPane
           rsi: { period: rsiPeriod, oversold: rsiOversold, overbought: rsiOverbought },
           macd: { fast: macdFast, slow: macdSlow, signal: macdSignal },
           bollinger: { period: bollPeriod, std_dev: bollStdDev },
+          ema: { fast_period: emaFastPeriod, slow_period: emaSlowPeriod },
+          min_agreement: minAgreement,
+          hold_opposition: holdOpposition,
           risk: {
             max_position_pct: riskMaxPos / 100,
             stop_loss_pct: riskStopLoss / 100,
@@ -753,6 +793,24 @@ export function BacktestPanel({ optimizedParams, onParamsApplied }: BacktestPane
                 </div>
               </div>
             )}
+
+            {enabledStrategies.has('ema') && (
+              <div>
+                <h3 className="text-xs font-medium text-[var(--accent)] mb-2">EMA Crossover Parameters</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <ParamInput label="Fast Period" value={emaFastPeriod} onChange={setEmaFastPeriod} min={3} max={20} tooltip="Period for the fast EMA. Lower = more responsive to recent price. Default: 9" />
+                  <ParamInput label="Slow Period" value={emaSlowPeriod} onChange={setEmaSlowPeriod} min={10} max={100} tooltip="Period for the slow EMA. Higher = smoother trend signal. Default: 21" />
+                </div>
+              </div>
+            )}
+
+            <div>
+              <h3 className="text-xs font-medium text-[var(--accent)] mb-2">Signal Quality</h3>
+              <div className="grid grid-cols-2 gap-3">
+                <ParamInput label="Min Agreement" value={minAgreement} onChange={setMinAgreement} min={1} max={enabledStrategies.size} tooltip="Minimum number of strategies that must agree on a direction (BUY/SELL) before a trade is executed. Higher = fewer but higher-quality trades. Default: 1" />
+                <ParamInput label="HOLD Opposition" value={holdOpposition} onChange={setHoldOpposition} min={0} max={0.5} step={0.05} tooltip="Penalty weight applied by each HOLD signal against directional signals. Higher = harder for a lone signal to trigger a trade. 0 = disabled (old behavior). Default: 0.0" />
+              </div>
+            </div>
 
             {aiEnabled && (
               <div>

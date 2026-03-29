@@ -273,7 +273,10 @@ class TradingEngine:
             await self._persist_signals(signals)
 
             combined = self._aggregate_signals(
-                signals, self._settings.strategies.weights,
+                signals,
+                self._settings.strategies.weights,
+                min_agreement=self._settings.strategies.min_agreement,
+                hold_opposition=self._settings.strategies.hold_opposition,
             )
             logger.info(
                 "Aggregated signal",
@@ -361,15 +364,20 @@ class TradingEngine:
     def _aggregate_signals(
         signals: list[Signal],
         weights: dict[str, float] | None = None,
+        min_agreement: int = 1,
+        hold_opposition: float = 0.0,
     ) -> Signal:
         """Combine multiple strategy signals into one decision.
 
         Uses per-strategy weights (defaulting to 1.0) applied to confidence
-        scores. Direction is decided by the side with higher weighted sum;
-        ties result in HOLD.
+        scores.  ``min_agreement`` requires at least N strategies to agree on
+        a direction; ``hold_opposition`` adds a penalty from HOLD signals so
+        a lone weak signal cannot win easily.
         """
         w = weights or {}
         non_hold = [s for s in signals if s.direction != "HOLD"]
+        holds = [s for s in signals if s.direction == "HOLD"]
+
         if not non_hold:
             return Signal(
                 symbol=signals[0].symbol,
@@ -379,14 +387,22 @@ class TradingEngine:
                 reason="All strategies returned HOLD",
             )
 
+        hold_penalty = sum(
+            hold_opposition * w.get(s.strategy_name, 1.0)
+            for s in holds
+        ) if hold_opposition > 0 else 0.0
+
         buy_weight = sum(
             s.confidence * w.get(s.strategy_name, 1.0)
             for s in non_hold if s.direction == "BUY"
-        )
+        ) - hold_penalty
         sell_weight = sum(
             s.confidence * w.get(s.strategy_name, 1.0)
             for s in non_hold if s.direction == "SELL"
-        )
+        ) - hold_penalty
+
+        buy_weight = max(buy_weight, 0.0)
+        sell_weight = max(sell_weight, 0.0)
 
         if buy_weight > sell_weight:
             direction = "BUY"
@@ -403,16 +419,28 @@ class TradingEngine:
                 reason="BUY/SELL signals tied",
             )
 
+        agreeing = [
+            s for s in non_hold if s.direction == direction
+        ]
+        if len(agreeing) < min_agreement:
+            return Signal(
+                symbol=signals[0].symbol,
+                direction="HOLD",
+                confidence=0.0,
+                strategy_name="aggregator",
+                reason=(
+                    f"Only {len(agreeing)} {direction} "
+                    f"(need {min_agreement})"
+                ),
+            )
+
         weight_sum = sum(
-            w.get(s.strategy_name, 1.0)
-            for s in non_hold if s.direction == direction
+            w.get(s.strategy_name, 1.0) for s in agreeing
         )
         avg_confidence = total_weight / weight_sum if weight_sum else 0.0
 
         reasons = [
-            f"{s.strategy_name}: {s.reason}"
-            for s in non_hold
-            if s.direction == direction
+            f"{s.strategy_name}: {s.reason}" for s in agreeing
         ]
 
         return Signal(

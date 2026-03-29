@@ -968,3 +968,113 @@ class TestStopLossFillPrice:
                 f"candle close {crash_close:.2f}; stop should fill "
                 f"at the stop price, not the close"
             )
+
+
+# ---------------------------------------------------------------------------
+# Min-Agreement / Hold-Opposition parity
+# ---------------------------------------------------------------------------
+
+class TestMinAgreementParity:
+    """min_agreement in BacktestEngine matches TradingEngine behavior."""
+
+    @pytest.mark.asyncio
+    async def test_min_agreement_blocks_lone_buy(self):
+        """With min_agreement=2, a single BUY among HOLDs produces no trade."""
+        ohlcv = _uptrend_ohlcv(n=50)
+        ex = BacktestExchange(
+            ohlcv=ohlcv, initial_balance_usdt=10000,
+            symbol="BTC/USDT", fee_rate=0.0, slippage_rate=0.0,
+        )
+
+        class _BuyStrategy(StrategyBase):
+            name = "buyer"
+
+            async def analyze(self, symbol, ohlcv_df):
+                return Signal(
+                    symbol=symbol, direction="BUY",
+                    confidence=0.8, strategy_name="buyer",
+                    reason="buy",
+                )
+
+        class _HoldStrategy(StrategyBase):
+            name = "holder"
+
+            async def analyze(self, symbol, ohlcv_df):
+                return Signal(
+                    symbol=symbol, direction="HOLD",
+                    confidence=0.0, strategy_name="holder",
+                    reason="hold",
+                )
+
+        engine = BacktestEngine(
+            exchange=ex,
+            strategies=[_BuyStrategy(), _HoldStrategy()],
+            symbol="BTC/USDT",
+            risk_config=_risk(),
+            min_agreement=2,
+        )
+        result = await engine.run()
+        buy_trades = [
+            t for t in result.trades if t.signal.direction == "BUY"
+        ]
+        assert len(buy_trades) == 0, "min_agreement=2 should block lone BUY"
+
+    @pytest.mark.asyncio
+    async def test_min_agreement_allows_consensus(self):
+        """With min_agreement=2 and 2 BUY strategies, trades happen."""
+        ohlcv = _uptrend_ohlcv(n=50)
+        ex = BacktestExchange(
+            ohlcv=ohlcv, initial_balance_usdt=10000,
+            symbol="BTC/USDT", fee_rate=0.0, slippage_rate=0.0,
+        )
+        engine = BacktestEngine(
+            exchange=ex,
+            strategies=[
+                _FixedStrategy("BUY", confidence=0.7),
+                _FixedStrategy("BUY", confidence=0.6),
+            ],
+            symbol="BTC/USDT",
+            risk_config=_risk(),
+            min_agreement=2,
+        )
+        result = await engine.run()
+        buy_trades = [
+            t for t in result.trades if t.signal.direction == "BUY"
+        ]
+        assert len(buy_trades) > 0, "2 BUY strategies should pass min_agreement=2"
+
+
+class TestEMAStrategyParity:
+    """EMA strategy works within the backtest engine."""
+
+    @pytest.mark.asyncio
+    async def test_ema_produces_trades(self):
+        """EMA strategy on trending data should generate at least one trade."""
+        from backend.config import EMAConfig
+        from backend.strategies.technical import EMAStrategy
+
+        decline = [200.0 - i * 1.0 for i in range(50)]
+        recovery = [decline[-1] + i * 2.0 for i in range(50)]
+        closes = decline + recovery
+        rows = []
+        for i, c in enumerate(closes):
+            ts = datetime(2025, 1, 1, tzinfo=UTC) + pd.Timedelta(hours=i)
+            rows.append({
+                "timestamp": ts, "open": c - 0.2,
+                "high": c + 3.0, "low": c - 3.0,
+                "close": c, "volume": 200.0,
+            })
+        ohlcv = pd.DataFrame(rows)
+
+        ex = BacktestExchange(
+            ohlcv=ohlcv, initial_balance_usdt=10000,
+            symbol="BTC/USDT", fee_rate=0.001, slippage_rate=0.0005,
+        )
+        engine = BacktestEngine(
+            exchange=ex,
+            strategies=[EMAStrategy(EMAConfig(fast_period=9, slow_period=21))],
+            symbol="BTC/USDT",
+            risk_config=_risk(min_confidence=0.3),
+        )
+        result = await engine.run()
+        assert len(result.trades) > 0, "EMA on trending data should produce trades"

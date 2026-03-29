@@ -112,6 +112,8 @@ async def _run_single_backtest(
     fee_rate: float,
     slippage_rate: float,
     strategy_weights: dict[str, float] | None = None,
+    min_agreement: int = 1,
+    hold_opposition: float = 0.0,
 ) -> BacktestReport:
     exchange = BacktestExchange(
         ohlcv=ohlcv,
@@ -128,6 +130,8 @@ async def _run_single_backtest(
         ai_filter_config=ai_filter_config,
         engine_config=engine_config,
         strategy_weights=strategy_weights,
+        min_agreement=min_agreement,
+        hold_opposition=hold_opposition,
     )
     result = await engine.run()
     return generate_report(result)
@@ -145,6 +149,8 @@ async def run_walk_forward(
     fee_rate: float = 0.001,
     slippage_rate: float = 0.0005,
     strategy_weights: dict[str, float] | None = None,
+    min_agreement: int = 1,
+    hold_opposition: float = 0.0,
 ) -> WalkForwardResult:
     """Run walk-forward validation across all folds."""
     folds_data = split_folds(ohlcv, wf_config)
@@ -179,11 +185,13 @@ async def run_walk_forward(
             train_df, symbol, balance, strategies,
             risk_config, ai_filter_config, engine_config,
             fee_rate, slippage_rate, strategy_weights,
+            min_agreement, hold_opposition,
         )
         test_report = await _run_single_backtest(
             test_df, symbol, balance, strategies,
             risk_config, ai_filter_config, engine_config,
             fee_rate, slippage_rate, strategy_weights,
+            min_agreement, hold_opposition,
         )
 
         fold = FoldResult(

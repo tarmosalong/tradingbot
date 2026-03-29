@@ -14,6 +14,7 @@ from backend.backtest.report import generate_report
 from backend.backtest.walk_forward import WalkForwardConfig, run_walk_forward
 from backend.config import (
     BollingerConfig,
+    EMAConfig,
     MACDConfig,
     RiskConfig,
     RSIConfig,
@@ -34,6 +35,8 @@ PARAM_SPACES: dict[str, dict[str, dict]] = {
         "macd_signal": {"type": "int", "low": 4, "high": 12},
         "boll_period": {"type": "int", "low": 10, "high": 30},
         "boll_std_dev": {"type": "float", "low": 1.5, "high": 3.0},
+        "ema_fast_period": {"type": "int", "low": 5, "high": 15},
+        "ema_slow_period": {"type": "int", "low": 15, "high": 50},
     },
     "risk": {
         "stop_loss_pct": {"type": "float", "low": 0.01, "high": 0.08},
@@ -59,6 +62,10 @@ PARAM_SPACES: dict[str, dict[str, dict]] = {
             "type": "categorical",
             "choices": [True, False],
         },
+    },
+    "aggregator": {
+        "min_agreement": {"type": "int", "low": 1, "high": 4},
+        "hold_opposition": {"type": "float", "low": 0.0, "high": 0.3},
     },
 }
 
@@ -125,14 +132,23 @@ def _suggest_param(trial: optuna.Trial, name: str, spec: dict):
     raise ValueError(f"Unknown param type: {spec['type']}")
 
 
+@dataclass
+class BuiltConfig:
+    strategies: list[StrategyBase]
+    risk: RiskConfig
+    engine: EngineConfig
+    fee: float
+    slippage: float
+    min_agreement: int = 1
+    hold_opposition: float = 0.0
+
+
 def _build_configs_from_params(
     params: dict,
     strategy_names: list[str],
     base_fee: float,
     base_slippage: float,
-) -> tuple[
-    list[StrategyBase], RiskConfig, EngineConfig, float, float,
-]:
+) -> BuiltConfig:
     rsi_cfg = RSIConfig(
         period=params.get("rsi_period", 14),
         oversold=params.get("rsi_oversold", 30),
@@ -147,7 +163,14 @@ def _build_configs_from_params(
         period=params.get("boll_period", 20),
         std_dev=params.get("boll_std_dev", 2.0),
     )
-    config_map = {"rsi": rsi_cfg, "macd": macd_cfg, "bollinger": boll_cfg}
+    ema_cfg = EMAConfig(
+        fast_period=params.get("ema_fast_period", 9),
+        slow_period=params.get("ema_slow_period", 21),
+    )
+    config_map = {
+        "rsi": rsi_cfg, "macd": macd_cfg,
+        "bollinger": boll_cfg, "ema": ema_cfg,
+    }
 
     strats = []
     for name in strategy_names:
@@ -179,7 +202,15 @@ def _build_configs_from_params(
         use_dynamic_sizing=params.get("use_dynamic_sizing", False),
     )
 
-    return strats, risk_config, engine_cfg, base_fee, base_slippage
+    return BuiltConfig(
+        strategies=strats,
+        risk=risk_config,
+        engine=engine_cfg,
+        fee=base_fee,
+        slippage=base_slippage,
+        min_agreement=params.get("min_agreement", 1),
+        hold_opposition=params.get("hold_opposition", 0.0),
+    )
 
 
 async def run_optimization(
@@ -224,26 +255,28 @@ async def run_optimization(
         for pname, spec in active_spaces.items():
             params[pname] = _suggest_param(trial, pname, spec)
 
-        strats, risk_cfg, engine_cfg, fee, slip = _build_configs_from_params(
+        built = _build_configs_from_params(
             params, strategy_names, fee_rate, slippage_rate,
         )
 
-        if not strats:
+        if not built.strategies:
             return float("-inf")
 
         exchange = BacktestExchange(
             ohlcv=ohlcv.copy(),
             initial_balance_usdt=balance,
             symbol=symbol,
-            fee_rate=fee,
-            slippage_rate=slip,
+            fee_rate=built.fee,
+            slippage_rate=built.slippage,
         )
         engine = BacktestEngine(
             exchange=exchange,
-            strategies=strats,
+            strategies=built.strategies,
             symbol=symbol,
-            risk_config=risk_cfg,
-            engine_config=engine_cfg,
+            risk_config=built.risk,
+            engine_config=built.engine,
+            min_agreement=built.min_agreement,
+            hold_opposition=built.hold_opposition,
         )
         result = await engine.run()
         report = generate_report(result)
@@ -295,20 +328,22 @@ async def run_optimization(
 
     if validate_best and best:
         logger.info("Running walk-forward validation on best params")
-        strats, risk_cfg, engine_cfg, fee, slip = _build_configs_from_params(
+        built = _build_configs_from_params(
             best.params, strategy_names, fee_rate, slippage_rate,
         )
         wf_result = await run_walk_forward(
             ohlcv=ohlcv,
             symbol=symbol,
             balance=balance,
-            strategies=strats,
-            risk_config=risk_cfg,
+            strategies=built.strategies,
+            risk_config=built.risk,
             ai_filter_config=AIFilterConfig(),
-            engine_config=engine_cfg,
+            engine_config=built.engine,
             wf_config=WalkForwardConfig(n_folds=3, train_pct=0.7),
-            fee_rate=fee,
-            slippage_rate=slip,
+            fee_rate=built.fee,
+            slippage_rate=built.slippage,
+            min_agreement=built.min_agreement,
+            hold_opposition=built.hold_opposition,
         )
         opt_result.validation = wf_result.to_dict()
 

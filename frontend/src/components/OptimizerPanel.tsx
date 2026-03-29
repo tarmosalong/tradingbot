@@ -39,11 +39,12 @@ const POPULAR_SYMBOLS = [
 ];
 
 const TUNE_GROUPS = [
-  { id: 'strategy', label: 'Strategy (RSI, MACD, Bollinger)', desc: 'Indicator periods, thresholds' },
+  { id: 'strategy', label: 'Strategy (RSI, MACD, Bollinger, EMA)', desc: 'Indicator periods, thresholds, EMA crossover' },
   { id: 'risk', label: 'Risk Management', desc: 'Stop-loss, position size, confidence' },
   { id: 'atr', label: 'ATR Stops', desc: 'ATR multipliers, partial TP' },
   { id: 'guards', label: 'Trading Guards', desc: 'Volume filter, EMA trend' },
   { id: 'engine', label: 'Engine', desc: 'Cooldown, dynamic sizing' },
+  { id: 'aggregator', label: 'Signal Aggregator', desc: 'Min agreement, HOLD opposition' },
 ] as const;
 
 const SCORING_OPTIONS = [
@@ -56,6 +57,7 @@ const AVAILABLE_STRATEGIES = [
   { id: 'rsi', label: 'RSI' },
   { id: 'macd', label: 'MACD' },
   { id: 'bollinger', label: 'Bollinger' },
+  { id: 'ema', label: 'EMA Crossover' },
 ] as const;
 
 const PARAM_LABELS: Record<string, string> = {
@@ -81,6 +83,10 @@ const PARAM_LABELS: Record<string, string> = {
   ema_trend_enabled: 'EMA Filter',
   cooldown_candles: 'Cooldown',
   use_dynamic_sizing: 'Dyn. Sizing',
+  ema_fast_period: 'EMA Fast',
+  ema_slow_period: 'EMA Slow',
+  min_agreement: 'Min Agreement',
+  hold_opposition: 'HOLD Opp.',
 };
 
 function formatParamValue(key: string, val: number | boolean): string {

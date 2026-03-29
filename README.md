@@ -69,6 +69,7 @@ graph TB
         RSI[RSI Strategy]
         MACD[MACD Strategy]
         BOLL[Bollinger Strategy]
+        EMA_S[EMA Crossover]
         AIS[AI Strategy]
         SENT[Sentiment Strategy]
     end
@@ -97,7 +98,7 @@ graph TB
     REST --> BEX
     WS --> TE
     TE --> AGG
-    AGG --> RSI & MACD & BOLL
+    AGG --> RSI & MACD & BOLL & EMA_S
     AGG --> AIS & SENT
     AIS --> MA --> CL
     SENT --> SA --> CL
@@ -164,7 +165,7 @@ tradingbot/
 │   │   └── paper_exchange.py   # Simulated exchange
 │   ├── strategies/
 │   │   ├── base.py             # StrategyBase ABC
-│   │   ├── technical.py        # RSI, MACD, Bollinger
+│   │   ├── technical.py        # RSI, MACD, Bollinger, EMA Crossover
 │   │   ├── ai_strategy.py      # Claude AI strategy
 │   │   └── sentiment.py        # News sentiment strategy
 │   ├── ai/
@@ -243,11 +244,14 @@ graph TD
 #### StrategiesConfig
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `enabled` | list[str] | `["rsi", "macd", "bollinger"]` | Active strategies (also: `ai_filter`, `sentiment`) |
+| `enabled` | list[str] | `["rsi", "macd", "bollinger"]` | Active strategies (also: `ema`, `ai_filter`, `sentiment`) |
 | `rsi` | RSIConfig | — | RSI parameters |
 | `macd` | MACDConfig | — | MACD parameters |
 | `bollinger` | BollingerConfig | — | Bollinger parameters |
+| `ema` | EMAConfig | — | EMA Crossover parameters |
 | `weights` | dict[str,float] | `{}` | Per-strategy weights for aggregation (default 1.0) |
+| `min_agreement` | int | `1` | Min strategies agreeing on direction before executing |
+| `hold_opposition` | float | `0.0` | Penalty per HOLD signal against directional signals |
 
 #### RSIConfig
 | Field | Type | Default | Description |
@@ -268,6 +272,12 @@ graph TD
 |-------|------|---------|-------------|
 | `period` | int | `20` | Moving average period |
 | `std_dev` | float | `2.0` | Number of standard deviations for bands |
+
+#### EMAConfig
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `fast_period` | int | `9` | Fast EMA period (responds quickly to price) |
+| `slow_period` | int | `21` | Slow EMA period (smoother trend signal) |
 
 #### AIConfig
 | Field | Type | Default | Description |
@@ -443,10 +453,12 @@ graph LR
     OHLCV[OHLCV Data<br/>100 candles] --> RSI["RSI Strategy<br/>period=14"]
     OHLCV --> MACD["MACD Strategy<br/>fast=12, slow=26"]
     OHLCV --> BOLL["Bollinger Strategy<br/>period=20, std=2.0"]
+    OHLCV --> EMA_S["EMA Crossover<br/>fast=9, slow=21"]
 
-    RSI --> |"Signal"| AGG["Aggregator<br/>Weighted vote"]
+    RSI --> |"Signal"| AGG["Aggregator<br/>Weighted vote<br/>+ min_agreement<br/>+ HOLD opposition"]
     MACD --> |"Signal"| AGG
     BOLL --> |"Signal"| AGG
+    EMA_S --> |"Signal"| AGG
 
     AGG --> |"Combined Signal"| FILTER["AI Filter<br/>(optional)"]
     FILTER --> |"Final Signal"| EXEC["Execute or HOLD"]
@@ -456,12 +468,17 @@ graph LR
 
 ```mermaid
 graph TD
-    SIG["All non-HOLD<br/>signals"] --> WEIGHT["Per-strategy weights<br/>BUY = Σ conf × weight<br/>SELL = Σ conf × weight"]
+    SIG["All signals"] --> SPLIT["Split: directional<br/>vs HOLD"]
+    SPLIT --> WEIGHT["BUY = Σ conf × weight - HOLD penalty<br/>SELL = Σ conf × weight - HOLD penalty"]
     WEIGHT --> CMP{"BUY > SELL?"}
-    CMP -->|Yes| BUY_DIR["Direction = BUY<br/>Weighted avg confidence"]
+    CMP -->|Yes| AGREE{"≥ min_agreement<br/>BUY strategies?"}
     CMP -->|No| CMP2{"SELL > BUY?"}
-    CMP2 -->|Yes| SELL_DIR["Direction = SELL<br/>Weighted avg confidence"]
+    CMP2 -->|Yes| AGREE2{"≥ min_agreement<br/>SELL strategies?"}
     CMP2 -->|Tie| HOLD["Direction = HOLD"]
+    AGREE -->|Yes| BUY_DIR["Direction = BUY"]
+    AGREE -->|No| HOLD
+    AGREE2 -->|Yes| SELL_DIR["Direction = SELL"]
+    AGREE2 -->|No| HOLD
     BUY_DIR --> FINAL["Aggregated Signal"]
     SELL_DIR --> FINAL
     HOLD --> FINAL
@@ -495,6 +512,16 @@ graph TD
     POS -->|"Close < Lower band"| BUY["BUY<br/>conf = 0.5 + penetration"]
     POS -->|"Close > Upper band"| SELL["SELL<br/>conf = 0.5 + penetration"]
     POS -->|"Between bands"| HOLD["HOLD"]
+```
+
+### EMA Crossover Strategy Logic
+
+```mermaid
+graph TD
+    CALC["Compute fast EMA<br/>and slow EMA"] --> CROSS{"Crossover?"}
+    CROSS -->|"fast crosses above slow"| BUY["BUY (bullish)<br/>conf = 0.5 + gap/ATR"]
+    CROSS -->|"fast crosses below slow"| SELL["SELL (bearish)<br/>conf = 0.5 + gap/ATR"]
+    CROSS -->|"No crossover"| HOLD["HOLD<br/>warmth if converging"]
 ```
 
 ---
@@ -609,11 +636,12 @@ Automated parameter search using Bayesian optimization (Optuna TPE sampler). Run
 
 | Group | Parameters |
 |-------|-----------|
-| `strategy` | RSI period/oversold/overbought, MACD fast/slow/signal, Bollinger period/std_dev |
+| `strategy` | RSI period/oversold/overbought, MACD fast/slow/signal, Bollinger period/std_dev, EMA fast/slow period |
 | `risk` | stop_loss_pct, trailing_stop_pct, max_position_pct, min_confidence, risk_per_trade_pct |
 | `atr` | atr_stop_multiplier, atr_tp_multiplier, atr_trailing_multiplier, partial_tp_ratio |
 | `guards` | volume_min_multiplier, ema_trend_period, ema_trend_enabled |
 | `engine` | cooldown_candles, use_dynamic_sizing |
+| `aggregator` | min_agreement (1–4), hold_opposition (0.0–0.3) |
 
 **Scoring metrics:** `sharpe` (risk-adjusted return, default), `return` (total return %), `calmar` (return / max drawdown).
 
@@ -779,6 +807,8 @@ The live/paper trading engine applies the following guards on every tick:
 | **ATR position sizing** | `risk_per_trade_pct` | Sizes positions inversely to volatility: `risk_amount / (ATR × stop_mult)` |
 | **Partial take-profit** | `partial_tp_ratio` | Sells a fraction at ATR TP target, moves stop to breakeven for remainder |
 | **Strategy weights** | `strategies.weights` | Per-strategy multiplier on confidence (e.g. `{"macd": 1.5, "rsi": 0.8}`) |
+| **Min agreement** | `strategies.min_agreement` | Minimum strategies that must agree on BUY/SELL before executing (default 1) |
+| **HOLD opposition** | `strategies.hold_opposition` | Penalty weight each HOLD signal applies against directional signals (default 0.0) |
 | **Circuit breaker** | `circuit_breaker_threshold` | After N consecutive tick errors, the engine pauses for 5 minutes |
 | **Duplicate BUY block** | — | Skips BUY if already holding a position for that symbol |
 | **Trade cooldown** | `poll_interval_seconds × 3` | Prevents rapid-fire BUYs on the same symbol |
@@ -802,6 +832,8 @@ The backtest engine now mirrors every guard and exit condition from the live eng
 | **Drawdown halt** | Peak-to-trough drawdown circuit breaker (permanent) |
 | **Daily loss limit** | Tracks daily P&L with calendar-day reset |
 | **Strategy weighting** | `strategy_weights` dict passed to `_aggregate_signals()` |
+| **Min agreement** | `min_agreement` passed through to aggregator (same logic as live) |
+| **HOLD opposition** | `hold_opposition` passed through to aggregator (same logic as live) |
 | **Percentage fallback** | Falls back to `stop_loss_pct`/`trailing_stop_pct` when ATR is zero |
 
 ```mermaid
@@ -854,7 +886,7 @@ graph TD
     DASH --> TT["TradesTable<br/>Recent trades"]
 
     BTP --> FORM["Input Form<br/>Symbol, dates, balance"]
-    BTP --> STRAT["Strategy Toggles<br/>RSI, MACD, Bollinger"]
+    BTP --> STRAT["Strategy Toggles<br/>RSI, MACD, Bollinger, EMA"]
     BTP --> AITOGGLE["AI Crash Filter<br/>Toggle + Strength"]
     BTP --> ADV["Advanced Settings"]
     BTP --> RESULTS["Results"]
@@ -917,11 +949,14 @@ If the dashboard shows **Not Found** for bot actions, the API process is missing
   "start": "2025-01-01",
   "end": "2025-06-30",
   "balance": 10000.0,
-  "strategies": ["rsi", "macd", "bollinger"],
-  "strategy_weights": { "rsi": 1.0, "macd": 1.5, "bollinger": 0.8 },
+  "strategies": ["rsi", "macd", "bollinger", "ema"],
+  "strategy_weights": { "rsi": 1.0, "macd": 1.5, "bollinger": 0.8, "ema": 1.2 },
   "rsi": { "period": 14, "oversold": 30, "overbought": 70 },
   "macd": { "fast": 12, "slow": 26, "signal": 9 },
   "bollinger": { "period": 20, "std_dev": 2.0 },
+  "ema": { "fast_period": 9, "slow_period": 21 },
+  "min_agreement": 2,
+  "hold_opposition": 0.1,
   "risk": {
     "max_position_pct": 0.10,
     "stop_loss_pct": 0.03,
@@ -1045,7 +1080,7 @@ sequenceDiagram
     participant Timer as Scheduler (60s)
     participant Engine as TradingEngine
     participant Exchange as Binance/Paper
-    participant Strategies as RSI + MACD + BB
+    participant Strategies as RSI + MACD + BB + EMA
     participant Risk as RiskManager
     participant DB as SQLite
 
@@ -1058,6 +1093,7 @@ sequenceDiagram
             Engine->>Strategies: RSI.analyze()
             Engine->>Strategies: MACD.analyze()
             Engine->>Strategies: Bollinger.analyze()
+            Engine->>Strategies: EMA.analyze()
         end
 
         Strategies-->>Engine: [Signal, Signal, Signal]
@@ -1162,18 +1198,19 @@ ruff check backend/ tests/
 | `tests/backtest/test_ai_filter.py` | 11 | Crash detection, recovery, strength, stats |
 | `tests/backtest/test_engine.py` | 4 | Base engine execution, trending data, equity curve |
 | `tests/backtest/test_engine_advanced.py` | 10 | Fees, slippage, stop-loss, trailing, cooldown, drawdown, dynamic sizing |
-| `tests/backtest/test_engine_parity.py` | 27 | ATR stops/TP/trailing, volume filter, EMA filter, confidence, cooldown, drawdown halt, daily loss limit, ATR sizing, strategy weights, partial TP, percentage fallback, regime filter, multi-day reset, full cycle |
+| `tests/backtest/test_engine_parity.py` | 30 | ATR stops/TP/trailing, volume filter, EMA filter, confidence, cooldown, drawdown halt, daily loss limit, ATR sizing, strategy weights, partial TP, percentage fallback, regime filter, multi-day reset, full cycle, min_agreement parity, EMA strategy parity |
 | `tests/backtest/test_exchange.py` | 12 | Exchange balances, orders, insufficient funds |
 | `tests/backtest/test_data_loader.py` | 3 | CSV round-trip, timezone handling |
 | `tests/backtest/test_report.py` | 12 | Drawdown, returns, Sharpe, report generation |
 | `tests/backtest/test_walk_forward.py` | 10 | Fold splitting, rolling/expanding, OOS aggregation |
-| `tests/backtest/test_optimizer.py` | 10 | Optuna integration, parameter building, scoring metrics, walk-forward validation |
-| **Total `tests/backtest/`** | **99** | (all backtest-related modules) |
+| `tests/backtest/test_optimizer.py` | 12 | Optuna integration, parameter building, EMA + aggregator configs, scoring metrics, walk-forward validation |
+| **Total `tests/backtest/`** | **104** | (all backtest-related modules) |
 | `tests/notifications/test_telegram.py` | 11 | Telegram API payload, disabled path, session lifecycle |
 | `tests/ai/test_openai_client.py` | 5 | OpenAI JSON parsing, LLMProvider |
 | `tests/ai/test_veto_system.py` | 9 | Quorum, failures, timeouts |
 | `tests/test_database.py` | 11 | Trades, orders, portfolio snapshots, signal log insert/query/filters |
-| `tests/core/test_engine.py` | 28+ | Signal aggregation, tick execution, ATR stops, volume filter, EMA trend, strategy weights, partial TP |
+| `tests/core/test_engine.py` | 35+ | Signal aggregation, tick execution, ATR stops, volume filter, EMA trend, strategy weights, partial TP, min_agreement, hold_opposition |
 | `tests/core/test_engine_scenarios.py` | 63 | End-to-end scenarios: slippage, whipsaw, flash crash, exchange errors, multi-position, halt persistence |
 | `tests/api/test_routes.py` | 13 | REST endpoints: health, config, trades, orders, portfolio, signals |
-| `tests/` (all) | **373** | Full suite — `pytest tests/ -v` |
+| `tests/strategies/test_ema_strategy.py` | 8 | EMA crossover: bullish/bearish signals, HOLD, confidence scaling, config |
+| `tests/` (all) | **393** | Full suite — `pytest tests/ -v` |

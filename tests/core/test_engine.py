@@ -1045,3 +1045,147 @@ class TestStrategyWeights:
         ]
         result = TradingEngine._aggregate_signals(signals, {"rsi": 2.0})
         assert result.confidence == pytest.approx(0.7)
+
+
+class TestMinAgreement:
+    def test_single_buy_blocked_by_min_agreement_2(self):
+        signals = [
+            Signal(
+                symbol="BTC/USDT", direction="BUY",
+                confidence=0.8, strategy_name="rsi", reason="oversold",
+            ),
+            Signal(
+                symbol="BTC/USDT", direction="HOLD",
+                confidence=0.0, strategy_name="macd", reason="neutral",
+            ),
+            Signal(
+                symbol="BTC/USDT", direction="HOLD",
+                confidence=0.0, strategy_name="ema", reason="neutral",
+            ),
+        ]
+        result = TradingEngine._aggregate_signals(
+            signals, min_agreement=2,
+        )
+        assert result.direction == "HOLD"
+        assert "need 2" in result.reason
+
+    def test_two_buys_pass_min_agreement_2(self):
+        signals = [
+            Signal(
+                symbol="BTC/USDT", direction="BUY",
+                confidence=0.7, strategy_name="rsi", reason="oversold",
+            ),
+            Signal(
+                symbol="BTC/USDT", direction="BUY",
+                confidence=0.6, strategy_name="ema", reason="crossover",
+            ),
+            Signal(
+                symbol="BTC/USDT", direction="HOLD",
+                confidence=0.0, strategy_name="macd", reason="neutral",
+            ),
+        ]
+        result = TradingEngine._aggregate_signals(
+            signals, min_agreement=2,
+        )
+        assert result.direction == "BUY"
+        assert result.confidence > 0
+
+    def test_min_agreement_1_allows_single_signal(self):
+        signals = [
+            Signal(
+                symbol="BTC/USDT", direction="BUY",
+                confidence=0.6, strategy_name="rsi", reason="oversold",
+            ),
+            Signal(
+                symbol="BTC/USDT", direction="HOLD",
+                confidence=0.0, strategy_name="macd", reason="neutral",
+            ),
+        ]
+        result = TradingEngine._aggregate_signals(
+            signals, min_agreement=1,
+        )
+        assert result.direction == "BUY"
+
+
+class TestHoldOpposition:
+    def test_hold_opposition_blocks_weak_signal(self):
+        signals = [
+            Signal(
+                symbol="BTC/USDT", direction="BUY",
+                confidence=0.1, strategy_name="rsi", reason="weak",
+            ),
+            Signal(
+                symbol="BTC/USDT", direction="HOLD",
+                confidence=0.0, strategy_name="macd", reason="neutral",
+            ),
+            Signal(
+                symbol="BTC/USDT", direction="HOLD",
+                confidence=0.0, strategy_name="ema", reason="neutral",
+            ),
+        ]
+        result = TradingEngine._aggregate_signals(
+            signals, hold_opposition=0.2,
+        )
+        assert result.direction == "HOLD"
+
+    def test_hold_opposition_zero_matches_old_behavior(self):
+        signals = [
+            Signal(
+                symbol="BTC/USDT", direction="BUY",
+                confidence=0.6, strategy_name="rsi", reason="oversold",
+            ),
+            Signal(
+                symbol="BTC/USDT", direction="HOLD",
+                confidence=0.0, strategy_name="macd", reason="neutral",
+            ),
+        ]
+        result = TradingEngine._aggregate_signals(
+            signals, hold_opposition=0.0,
+        )
+        assert result.direction == "BUY"
+        assert result.confidence == pytest.approx(0.6)
+
+    def test_hold_opposition_reduces_confidence(self):
+        signals = [
+            Signal(
+                symbol="BTC/USDT", direction="BUY",
+                confidence=0.8, strategy_name="rsi", reason="oversold",
+            ),
+            Signal(
+                symbol="BTC/USDT", direction="HOLD",
+                confidence=0.0, strategy_name="macd", reason="neutral",
+            ),
+        ]
+        with_opp = TradingEngine._aggregate_signals(
+            signals, hold_opposition=0.1,
+        )
+        without_opp = TradingEngine._aggregate_signals(
+            signals, hold_opposition=0.0,
+        )
+        assert with_opp.direction == "BUY"
+        assert with_opp.confidence < without_opp.confidence
+
+    def test_combined_min_agreement_and_hold_opposition(self):
+        signals = [
+            Signal(
+                symbol="BTC/USDT", direction="BUY",
+                confidence=0.7, strategy_name="rsi", reason="oversold",
+            ),
+            Signal(
+                symbol="BTC/USDT", direction="BUY",
+                confidence=0.6, strategy_name="ema", reason="crossover",
+            ),
+            Signal(
+                symbol="BTC/USDT", direction="HOLD",
+                confidence=0.0, strategy_name="macd", reason="neutral",
+            ),
+            Signal(
+                symbol="BTC/USDT", direction="HOLD",
+                confidence=0.0, strategy_name="bollinger", reason="neutral",
+            ),
+        ]
+        result = TradingEngine._aggregate_signals(
+            signals, min_agreement=2, hold_opposition=0.1,
+        )
+        assert result.direction == "BUY"
+        assert result.confidence > 0
