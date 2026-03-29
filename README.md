@@ -242,10 +242,11 @@ graph TD
 #### StrategiesConfig
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `enabled` | list[str] | `["rsi", "macd", "bollinger"]` | Active strategies |
+| `enabled` | list[str] | `["rsi", "macd", "bollinger"]` | Active strategies (also: `ai_filter`, `sentiment`) |
 | `rsi` | RSIConfig | — | RSI parameters |
 | `macd` | MACDConfig | — | MACD parameters |
 | `bollinger` | BollingerConfig | — | Bollinger parameters |
+| `weights` | dict[str,float] | `{}` | Per-strategy weights for aggregation (default 1.0) |
 
 #### RSIConfig
 | Field | Type | Default | Description |
@@ -293,8 +294,8 @@ If both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are present in `.env`, `load
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `max_position_pct` | float | `0.10` | Max position size (% of balance) |
-| `stop_loss_pct` | float | `0.03` | Fixed stop-loss % |
-| `trailing_stop_pct` | float | `0.02` | Trailing stop % from peak |
+| `stop_loss_pct` | float | `0.03` | Fixed stop-loss % (fallback when ATR unavailable) |
+| `trailing_stop_pct` | float | `0.02` | Trailing stop % from peak (fallback) |
 | `max_drawdown_pct` | float | `0.15` | Max drawdown before trading halt |
 | `daily_loss_limit_pct` | float | `0.05` | Daily loss limit |
 | `max_single_order_usdt` | float | `1000.0` | Max single order value in USDT |
@@ -303,6 +304,14 @@ If both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are present in `.env`, `load
 | `max_data_age_seconds` | int | `3600` | Max OHLCV candle age before data is considered stale |
 | `max_price_deviation_pct` | float | `0.05` | Max allowed price deviation from last close (anti-glitch) |
 | `circuit_breaker_threshold` | int | `5` | Consecutive tick errors before 5-min pause |
+| `atr_stop_multiplier` | float | `2.0` | ATR multiplier for stop-loss distance |
+| `atr_tp_multiplier` | float | `3.0` | ATR multiplier for take-profit target |
+| `atr_trailing_multiplier` | float | `1.5` | ATR multiplier for trailing stop distance |
+| `volume_min_multiplier` | float | `1.2` | Min volume/SMA-20 ratio to confirm signals |
+| `ema_trend_period` | int | `50` | EMA period for trend filter |
+| `ema_trend_enabled` | bool | `True` | Only BUY above EMA, SELL below EMA |
+| `risk_per_trade_pct` | float | `0.01` | Portfolio % risked per trade (ATR position sizing) |
+| `partial_tp_ratio` | float | `0.5` | Fraction sold at first take-profit target |
 
 #### BacktestConfig
 | Field | Type | Default | Description |
@@ -446,11 +455,11 @@ graph LR
 
 ```mermaid
 graph TD
-    SIG["All non-HOLD<br/>signals"] --> WEIGHT["Compute weights<br/>BUY weight = Σ confidence<br/>SELL weight = Σ confidence"]
+    SIG["All non-HOLD<br/>signals"] --> WEIGHT["Per-strategy weights<br/>BUY = Σ conf × weight<br/>SELL = Σ conf × weight"]
     WEIGHT --> CMP{"BUY > SELL?"}
-    CMP -->|Yes| BUY_DIR["Direction = BUY<br/>Avg confidence"]
+    CMP -->|Yes| BUY_DIR["Direction = BUY<br/>Weighted avg confidence"]
     CMP -->|No| CMP2{"SELL > BUY?"}
-    CMP2 -->|Yes| SELL_DIR["Direction = SELL<br/>Avg confidence"]
+    CMP2 -->|Yes| SELL_DIR["Direction = SELL<br/>Weighted avg confidence"]
     CMP2 -->|Tie| HOLD["Direction = HOLD"]
     BUY_DIR --> FINAL["Aggregated Signal"]
     SELL_DIR --> FINAL
@@ -704,9 +713,15 @@ The live/paper trading engine applies the following guards on every tick:
 |-------|-------------|-----------|
 | **RiskManager integration** | `max_drawdown_pct`, `daily_loss_limit_pct` | Portfolio-level drawdown halts all trading; daily loss limit skips the tick |
 | **Min confidence** | `min_confidence` | Aggregated signals below this threshold are ignored |
+| **Volume confirmation** | `volume_min_multiplier` | Rejects signals when current candle volume < SMA-20 × multiplier |
+| **EMA trend filter** | `ema_trend_period`, `ema_trend_enabled` | Only BUY when price > EMA, only SELL when price < EMA |
 | **Stale data** | `max_data_age_seconds` | If the latest OHLCV candle is older than this, the symbol is skipped |
 | **Max concurrent positions** | `max_concurrent_positions` | New BUYs are blocked when this many positions are already open |
 | **Price sanity** | `max_price_deviation_pct` | If the ticker price deviates more than this % from the last candle close, the trade is rejected |
+| **ATR dynamic stops** | `atr_stop_multiplier`, `atr_tp_multiplier`, `atr_trailing_multiplier` | Stop-loss, take-profit, and trailing stop derived from ATR-14 at entry (falls back to fixed % when ATR unavailable) |
+| **ATR position sizing** | `risk_per_trade_pct` | Sizes positions inversely to volatility: `risk_amount / (ATR × stop_mult)` |
+| **Partial take-profit** | `partial_tp_ratio` | Sells a fraction at ATR TP target, moves stop to breakeven for remainder |
+| **Strategy weights** | `strategies.weights` | Per-strategy multiplier on confidence (e.g. `{"macd": 1.5, "rsi": 0.8}`) |
 | **Circuit breaker** | `circuit_breaker_threshold` | After N consecutive tick errors, the engine pauses for 5 minutes |
 | **Duplicate BUY block** | — | Skips BUY if already holding a position for that symbol |
 | **Trade cooldown** | `poll_interval_seconds × 3` | Prevents rapid-fire BUYs on the same symbol |
@@ -1057,6 +1072,6 @@ ruff check backend/ tests/
 | `tests/ai/test_openai_client.py` | 5 | OpenAI JSON parsing, LLMProvider |
 | `tests/ai/test_veto_system.py` | 9 | Quorum, failures, timeouts |
 | `tests/test_database.py` | 11 | Trades, orders, portfolio snapshots, signal log insert/query/filters |
-| `tests/core/test_engine.py` | 11 | Signal aggregation, tick execution, signal persistence |
+| `tests/core/test_engine.py` | 28+ | Signal aggregation, tick execution, ATR stops, volume filter, EMA trend, strategy weights, partial TP |
 | `tests/api/test_routes.py` | 13 | REST endpoints: health, config, trades, orders, portfolio, signals |
-| `tests/` (all) | **229** | Full suite — `pytest tests/ -v` |
+| `tests/` (all) | **272** | Full suite — `pytest tests/ -v` |

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock
 
+import pandas as pd
 import pytest
 
 from backend.config import RiskConfig
@@ -215,3 +216,40 @@ class TestRiskManagerEdgeCases:
         )
 
         assert not decision.approved
+
+
+class TestATRCalculation:
+    def test_calculate_atr_basic(self, risk_manager):
+        ohlcv = pd.DataFrame({
+            "high": [110.0, 115.0, 120.0, 118.0] * 5,
+            "low": [100.0, 105.0, 108.0, 106.0] * 5,
+            "close": [105.0, 110.0, 115.0, 112.0] * 5,
+        })
+        atr = risk_manager.calculate_atr(ohlcv, period=14)
+        assert atr > 0
+
+    def test_atr_insufficient_data(self, risk_manager):
+        ohlcv = pd.DataFrame({
+            "high": [110.0], "low": [100.0], "close": [105.0],
+        })
+        assert risk_manager.calculate_atr(ohlcv, period=14) == 0.0
+
+    def test_calculate_atr_stops(self, risk_manager):
+        ohlcv = pd.DataFrame({
+            "high": [110.0, 115.0, 120.0, 118.0] * 5,
+            "low": [100.0, 105.0, 108.0, 106.0] * 5,
+            "close": [105.0, 110.0, 115.0, 112.0] * 5,
+        })
+        stops = risk_manager.calculate_atr_stops(ohlcv, entry_price=112.0)
+        assert stops.atr > 0
+        assert stops.stop_loss < 112.0
+        assert stops.take_profit > 112.0
+        assert stops.trailing_stop < 112.0
+
+    def test_atr_stops_fallback_no_data(self, risk_manager):
+        ohlcv = pd.DataFrame({
+            "high": [110.0], "low": [100.0], "close": [105.0],
+        })
+        stops = risk_manager.calculate_atr_stops(ohlcv, entry_price=100.0)
+        assert stops.atr == 0.0
+        assert stops.stop_loss == 100.0 * (1 - 0.03)

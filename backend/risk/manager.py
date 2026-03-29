@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
+
+import pandas as pd
 
 from backend.config import RiskConfig
 from backend.core.logger import get_logger
@@ -99,6 +102,41 @@ class RiskManager:
 
         return RiskDecision(approved=False, reason="HOLD signal, no action")
 
+    @staticmethod
+    def calculate_atr(ohlcv: pd.DataFrame, period: int = 14) -> float:
+        """Calculate the Average True Range from OHLCV data."""
+        if ohlcv is None or len(ohlcv) < period + 1:
+            return 0.0
+        high = ohlcv["high"]
+        low = ohlcv["low"]
+        close = ohlcv["close"].shift(1)
+        tr = pd.concat([
+            high - low,
+            (high - close).abs(),
+            (low - close).abs(),
+        ], axis=1).max(axis=1)
+        atr_val = tr.iloc[-period:].mean()
+        return float(atr_val) if not pd.isna(atr_val) else 0.0
+
+    def calculate_atr_stops(
+        self, ohlcv: pd.DataFrame, entry_price: float,
+    ) -> ATRStops:
+        """Calculate ATR-based stop-loss, take-profit, and trailing stop."""
+        atr = self.calculate_atr(ohlcv)
+        if atr <= 0:
+            return ATRStops(
+                atr=0.0,
+                stop_loss=entry_price * (1 - self._cfg.stop_loss_pct),
+                take_profit=0.0,
+                trailing_stop=entry_price * (1 - self._cfg.trailing_stop_pct),
+            )
+        return ATRStops(
+            atr=atr,
+            stop_loss=entry_price - atr * self._cfg.atr_stop_multiplier,
+            take_profit=entry_price + atr * self._cfg.atr_tp_multiplier,
+            trailing_stop=entry_price - atr * self._cfg.atr_trailing_multiplier,
+        )
+
     def calculate_stop_loss(self, entry_price: float, side: str) -> float:
         """Calculate stop-loss price for a new position."""
         if side == "BUY":
@@ -187,3 +225,13 @@ class RiskDecision:
     def __repr__(self) -> str:
         status = "APPROVED" if self.approved else "REJECTED"
         return f"RiskDecision({status}, amount={self.amount:.6f}, reason={self.reason!r})"
+
+
+@dataclass
+class ATRStops:
+    """ATR-derived stop-loss, take-profit, and trailing stop prices."""
+
+    atr: float
+    stop_loss: float
+    take_profit: float
+    trailing_stop: float

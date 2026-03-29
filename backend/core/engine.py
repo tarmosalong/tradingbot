@@ -27,11 +27,20 @@ class OpenPosition:
     amount: float
     entry_price: float
     peak_price: float
+    original_amount: float = 0.0
+    atr_at_entry: float = 0.0
+    atr_stop_loss: float = 0.0
+    atr_take_profit: float = 0.0
+    atr_trailing_multiplier: float = 1.5
+    partial_exits_done: int = 0
     opened_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+    def __post_init__(self) -> None:
+        if self.original_amount == 0.0:
+            self.original_amount = self.amount
 
     @property
     def stop_loss_pct(self) -> float:
-        """Filled in by engine from config."""
         return self._sl_pct
 
     @property
@@ -44,11 +53,19 @@ class OpenPosition:
 
     @property
     def stop_loss_price(self) -> float:
+        if self.atr_stop_loss > 0:
+            return self.atr_stop_loss
         return self.entry_price * (1 - self._sl_pct)
 
     @property
     def trailing_stop_price(self) -> float:
+        if self.atr_at_entry > 0:
+            return self.peak_price - self.atr_at_entry * self.atr_trailing_multiplier
         return self.peak_price * (1 - self._ts_pct)
+
+    @property
+    def take_profit_price(self) -> float:
+        return self.atr_take_profit
 
     def to_dict(self, current_price: float) -> dict:
         pnl = (current_price - self.entry_price) * self.amount
@@ -56,6 +73,29 @@ class OpenPosition:
             ((current_price / self.entry_price) - 1) * 100
             if self.entry_price
             else 0
+        )
+        conditions = [
+            (
+                f"Stop-loss at ${self.stop_loss_price:,.2f} ("
+                + ("ATR-based" if self.atr_stop_loss > 0
+                   else f"{self._sl_pct * 100:.1f}% below entry")
+                + ")"
+            ),
+            (
+                f"Trailing stop at ${self.trailing_stop_price:,.2f} ("
+                + ("ATR-based" if self.atr_at_entry > 0
+                   else f"{self._ts_pct * 100:.1f}% below peak")
+                + f" ${self.peak_price:,.2f})"
+            ),
+        ]
+        if self.atr_take_profit > 0:
+            conditions.append(
+                f"Take-profit at ${self.atr_take_profit:,.2f}"
+                f" (ATR \u00d7 {self.atr_at_entry:.0f})"
+            )
+        conditions.append(
+            "Strategy SELL signal (RSI \u2265 70 or MACD bearish"
+            " crossover or price above Bollinger upper band)"
         )
         return {
             "symbol": self.symbol,
@@ -67,22 +107,9 @@ class OpenPosition:
             "pnl_pct": round(pnl_pct, 2),
             "stop_loss_price": round(self.stop_loss_price, 2),
             "trailing_stop_price": round(self.trailing_stop_price, 2),
+            "take_profit_price": round(self.atr_take_profit, 2),
             "opened_at": self.opened_at.isoformat(),
-            "exit_conditions": [
-                (
-                    f"Stop-loss at ${self.stop_loss_price:,.2f}"
-                    f" ({self._sl_pct*100:.1f}% below entry)"
-                ),
-                (
-                    f"Trailing stop at ${self.trailing_stop_price:,.2f}"
-                    f" ({self._ts_pct*100:.1f}% below peak"
-                    f" ${self.peak_price:,.2f})"
-                ),
-                (
-                    "Strategy SELL signal (RSI \u2265 70 or MACD bearish"
-                    " crossover or price above Bollinger upper band)"
-                ),
-            ],
+            "exit_conditions": conditions,
         }
 
 
@@ -245,7 +272,9 @@ class TradingEngine:
 
             await self._persist_signals(signals)
 
-            combined = self._aggregate_signals(signals)
+            combined = self._aggregate_signals(
+                signals, self._settings.strategies.weights,
+            )
             logger.info(
                 "Aggregated signal",
                 symbol=symbol,
@@ -269,8 +298,30 @@ class TradingEngine:
                 )
                 continue
 
+            if not self._check_volume_confirmation(
+                ohlcv, risk.volume_min_multiplier,
+            ):
+                logger.info(
+                    "Volume too low — skipping signal",
+                    symbol=symbol,
+                    direction=combined.direction,
+                    multiplier=risk.volume_min_multiplier,
+                )
+                continue
+
+            if risk.ema_trend_enabled and not self._check_ema_trend(
+                ohlcv, combined.direction, risk.ema_trend_period,
+            ):
+                logger.info(
+                    "EMA trend filter — direction conflicts with trend",
+                    symbol=symbol,
+                    direction=combined.direction,
+                    ema_period=risk.ema_trend_period,
+                )
+                continue
+
             last_close = float(ohlcv["close"].iloc[-1])
-            await self._execute_signal(combined, last_close)
+            await self._execute_signal(combined, last_close, ohlcv)
             await self._snapshot_portfolio()
 
     @staticmethod
@@ -307,12 +358,17 @@ class TradingEngine:
         return signals
 
     @staticmethod
-    def _aggregate_signals(signals: list[Signal]) -> Signal:
+    def _aggregate_signals(
+        signals: list[Signal],
+        weights: dict[str, float] | None = None,
+    ) -> Signal:
         """Combine multiple strategy signals into one decision.
 
-        Weighted average of confidence scores. Direction is decided by
-        majority vote among non-HOLD signals; ties result in HOLD.
+        Uses per-strategy weights (defaulting to 1.0) applied to confidence
+        scores. Direction is decided by the side with higher weighted sum;
+        ties result in HOLD.
         """
+        w = weights or {}
         non_hold = [s for s in signals if s.direction != "HOLD"]
         if not non_hold:
             return Signal(
@@ -324,10 +380,12 @@ class TradingEngine:
             )
 
         buy_weight = sum(
-            s.confidence for s in non_hold if s.direction == "BUY"
+            s.confidence * w.get(s.strategy_name, 1.0)
+            for s in non_hold if s.direction == "BUY"
         )
         sell_weight = sum(
-            s.confidence for s in non_hold if s.direction == "SELL"
+            s.confidence * w.get(s.strategy_name, 1.0)
+            for s in non_hold if s.direction == "SELL"
         )
 
         if buy_weight > sell_weight:
@@ -345,10 +403,11 @@ class TradingEngine:
                 reason="BUY/SELL signals tied",
             )
 
-        count = sum(
-            1 for s in non_hold if s.direction == direction
+        weight_sum = sum(
+            w.get(s.strategy_name, 1.0)
+            for s in non_hold if s.direction == direction
         )
-        avg_confidence = total_weight / count
+        avg_confidence = total_weight / weight_sum if weight_sum else 0.0
 
         reasons = [
             f"{s.strategy_name}: {s.reason}"
@@ -392,7 +451,7 @@ class TradingEngine:
             logger.debug("Signal broadcast failed")
 
     async def _check_position_exit(self, symbol: str) -> bool:
-        """Check if an open position should be closed."""
+        """Check if an open position should be closed (full or partial)."""
         pos = self._positions.get(symbol)
         if not pos:
             return False
@@ -407,19 +466,49 @@ class TradingEngine:
             pos.peak_price = price
 
         risk = self._settings.risk
-        sl_price = pos.entry_price * (1 - risk.stop_loss_pct)
-        ts_price = pos.peak_price * (1 - risk.trailing_stop_pct)
+        sl_price = pos.stop_loss_price
+        ts_price = pos.trailing_stop_price
+
+        if (
+            pos.atr_take_profit > 0
+            and price >= pos.atr_take_profit
+            and pos.partial_exits_done == 0
+            and risk.partial_tp_ratio > 0
+        ):
+            sell_amount = pos.amount * risk.partial_tp_ratio
+            exit_reason = (
+                f"Partial take-profit at ${price:,.2f}"
+                f" (target ${pos.atr_take_profit:,.2f},"
+                f" selling {risk.partial_tp_ratio:.0%})"
+            )
+            logger.info("Partial exit", symbol=symbol, reason=exit_reason)
+
+            signal = Signal(
+                symbol=symbol,
+                direction="SELL",
+                confidence=1.0,
+                strategy_name="partial_tp",
+                reason=exit_reason,
+                timestamp=datetime.now(UTC),
+            )
+            await self._persist_signals([signal])
+            await self._broadcast_signal(signal)
+            await self._execute_partial_sell(signal, sell_amount)
+
+            pos.partial_exits_done += 1
+            pos.atr_stop_loss = pos.entry_price
+            return True
 
         exit_reason = None
 
-        if risk.stop_loss_pct > 0 and price <= sl_price:
+        if sl_price > 0 and price <= sl_price:
             exit_reason = (
                 f"Stop-loss triggered at ${price:,.2f}"
                 f" (entry ${pos.entry_price:,.2f},"
                 f" limit ${sl_price:,.2f})"
             )
         elif (
-            risk.trailing_stop_pct > 0
+            ts_price > 0
             and price <= ts_price
             and ts_price > sl_price
         ):
@@ -447,10 +536,96 @@ class TradingEngine:
         await self._execute_signal(signal)
         return True
 
+    @staticmethod
+    def _check_volume_confirmation(ohlcv, multiplier: float) -> bool:
+        """Return True if latest volume exceeds SMA-20 * multiplier."""
+        if ohlcv is None or len(ohlcv) < 20:
+            return True
+        vol = ohlcv["volume"]
+        sma = vol.iloc[-20:].mean()
+        if sma <= 0:
+            return True
+        return float(vol.iloc[-1]) >= sma * multiplier
+
+    @staticmethod
+    def _check_ema_trend(ohlcv, direction: str, period: int) -> bool:
+        """Return True if the trend aligns with the trade direction."""
+        if ohlcv is None or len(ohlcv) < period:
+            return True
+        close = ohlcv["close"]
+        ema = close.ewm(span=period, adjust=False).mean()
+        last_close = float(close.iloc[-1])
+        last_ema = float(ema.iloc[-1])
+        if direction == "BUY":
+            return last_close > last_ema
+        if direction == "SELL":
+            return last_close < last_ema
+        return True
+
+    def _calculate_atr_budget(
+        self, ohlcv, price: float, portfolio_val: float,
+    ) -> float | None:
+        """Position size based on ATR: risk_amount / ATR giving dollar budget."""
+        risk = self._settings.risk
+        atr = self._risk_manager.calculate_atr(ohlcv)
+        if atr <= 0 or price <= 0:
+            return None
+        risk_amount = portfolio_val * risk.risk_per_trade_pct
+        atr_stop_dist = atr * risk.atr_stop_multiplier
+        shares = risk_amount / atr_stop_dist
+        return shares * price
+
+    async def _execute_partial_sell(
+        self, signal: Signal, sell_amount: float,
+    ) -> None:
+        """Execute a partial sell of a position."""
+        balance = await self._exchange.get_balance()
+        base, _ = signal.symbol.split("/")
+        available = balance.get(base, 0.0)
+        amount = min(sell_amount, available)
+        if amount <= 0:
+            return
+
+        try:
+            order = await self._exchange.create_order(
+                symbol=signal.symbol,
+                side="SELL",
+                order_type="MARKET",
+                amount=amount,
+            )
+            fill_price = order.filled_price or 0.0
+            logger.info(
+                "Partial sell executed",
+                symbol=signal.symbol,
+                amount=order.filled_amount,
+                price=fill_price,
+            )
+            pos = self._positions.get(signal.symbol)
+            if pos:
+                pos.amount -= order.filled_amount
+                if pos.amount <= 0:
+                    self._positions.pop(signal.symbol, None)
+
+            trade = Trade(
+                id=str(uuid.uuid4()),
+                symbol=order.symbol,
+                side=OrderSide.SELL,
+                amount=order.filled_amount,
+                price=fill_price,
+                signal=signal,
+            )
+            await self._db.insert_trade(trade)
+            await self._db.insert_order(order)
+            await self._notify_trade(trade, signal)
+            self._last_trade_time[signal.symbol] = datetime.now(UTC)
+        except ExchangeError:
+            logger.exception("Partial sell failed", symbol=signal.symbol)
+
     async def _execute_signal(
         self,
         signal: Signal,
         last_close: float | None = None,
+        ohlcv=None,
     ) -> None:
         """Execute a trading signal via the exchange."""
         risk = self._settings.risk
@@ -527,11 +702,21 @@ class TradingEngine:
         if signal.direction == "BUY":
             available = balance.get(quote, 0.0)
             max_for_symbol = portfolio_val * position_pct
+
+            atr_budget = None
+            if ohlcv is not None:
+                atr_budget = self._calculate_atr_budget(
+                    ohlcv, ticker.last, portfolio_val,
+                )
+
             budget = min(
                 available * position_pct,
                 max_order,
                 max_for_symbol,
             )
+            if atr_budget is not None and atr_budget > 0:
+                budget = min(budget, atr_budget)
+
             if budget < 1.0:
                 logger.warning(
                     "Insufficient budget for BUY",
@@ -579,15 +764,24 @@ class TradingEngine:
                         + fill_price * order.filled_amount
                     ) / total_amount
                     existing.amount = total_amount
+                    existing.original_amount = total_amount
                     existing.entry_price = avg_price
                     if fill_price > existing.peak_price:
                         existing.peak_price = fill_price
                 else:
+                    atr_stops = self._risk_manager.calculate_atr_stops(
+                        ohlcv, fill_price,
+                    ) if ohlcv is not None else None
+
                     pos = OpenPosition(
                         symbol=signal.symbol,
                         amount=order.filled_amount,
                         entry_price=fill_price,
                         peak_price=fill_price,
+                        atr_at_entry=atr_stops.atr if atr_stops else 0.0,
+                        atr_stop_loss=atr_stops.stop_loss if atr_stops else 0.0,
+                        atr_take_profit=atr_stops.take_profit if atr_stops else 0.0,
+                        atr_trailing_multiplier=risk.atr_trailing_multiplier,
                     )
                     pos.set_risk(risk.stop_loss_pct, risk.trailing_stop_pct)
                     self._positions[signal.symbol] = pos

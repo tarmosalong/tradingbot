@@ -8,9 +8,10 @@ from typing import Any
 import yaml
 
 from backend.config import _project_root
-from backend.strategies import STRATEGY_REGISTRY
 
-ALLOWED_STRATEGIES = frozenset(STRATEGY_REGISTRY.keys())
+ALLOWED_STRATEGIES = frozenset({
+    "rsi", "macd", "bollinger", "ai_filter", "sentiment",
+})
 
 
 def config_yaml_path() -> Path:
@@ -51,6 +52,7 @@ def patch_paper_dashboard_settings(
     macd_params: dict[str, Any] | None = None,
     bollinger_params: dict[str, Any] | None = None,
     risk_params: dict[str, Any] | None = None,
+    strategy_weights: dict[str, float] | None = None,
     path: Path | None = None,
 ) -> None:
     """Merge allowed keys into config.yaml. Does not change trading.mode."""
@@ -93,7 +95,7 @@ def patch_paper_dashboard_settings(
             raise ValueError("strategies list must not be empty")
         if not any(s in ALLOWED_STRATEGIES for s in strategies_enabled):
             raise ValueError(
-                "at least one registered technical strategy required",
+                "at least one registered strategy required",
             )
         data.setdefault("strategies", {})
         data["strategies"]["enabled"] = list(strategies_enabled)
@@ -121,7 +123,16 @@ def patch_paper_dashboard_settings(
             "std_dev": (0.5, 4.0),
         })
 
+    if strategy_weights is not None:
+        data.setdefault("strategies", {})
+        cleaned = {k: max(0.1, min(5.0, float(v))) for k, v in strategy_weights.items()}
+        data["strategies"]["weights"] = cleaned
+
     if risk_params is not None:
+        if "ema_trend_enabled" in risk_params:
+            data.setdefault("risk", {})
+            data["risk"]["ema_trend_enabled"] = bool(risk_params.pop("ema_trend_enabled"))
+
         data.setdefault("risk", {})
         _merge_bounded(data["risk"], risk_params, {
             "max_position_pct": (0.01, 1.0),
@@ -135,6 +146,13 @@ def patch_paper_dashboard_settings(
             "max_data_age_seconds": (60, 86_400),
             "max_price_deviation_pct": (0.01, 0.50),
             "circuit_breaker_threshold": (1, 50),
+            "atr_stop_multiplier": (0.5, 5.0),
+            "atr_tp_multiplier": (0.5, 10.0),
+            "atr_trailing_multiplier": (0.5, 5.0),
+            "volume_min_multiplier": (0.5, 5.0),
+            "ema_trend_period": (10, 200),
+            "risk_per_trade_pct": (0.001, 0.10),
+            "partial_tp_ratio": (0.1, 1.0),
         })
 
     write_raw_config(data, path)

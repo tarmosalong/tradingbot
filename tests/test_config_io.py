@@ -59,11 +59,11 @@ def test_patch_strategies_keeps_non_registry_names(tmp_path: Path) -> None:
     ]
 
 
-def test_patch_rejects_no_registered_technical_strategy(tmp_path: Path) -> None:
+def test_patch_rejects_no_registered_strategy(tmp_path: Path) -> None:
     p = tmp_path / "config.yaml"
     write_raw_config({}, path=p)
-    with pytest.raises(ValueError, match="registered technical"):
-        patch_paper_dashboard_settings(strategies_enabled=["ai_filter", "sentiment"], path=p)
+    with pytest.raises(ValueError, match="registered"):
+        patch_paper_dashboard_settings(strategies_enabled=["unknown_strat"], path=p)
 
 
 def test_patch_rsi_params(tmp_path: Path) -> None:

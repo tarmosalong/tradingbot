@@ -46,16 +46,22 @@ async def db(tmp_path):
 
 
 def _recent_ohlcv(periods: int = 20) -> pd.DataFrame:
-    """OHLCV DataFrame with timestamps ending near 'now' so stale-data guard passes."""
+    """OHLCV DataFrame with timestamps ending near 'now' so stale-data guard passes.
+
+    Volume on the last candle is above the SMA-20 * 1.2 threshold so the
+    volume confirmation guard passes by default.
+    """
     end = pd.Timestamp.now(tz="UTC")
     start = end - pd.Timedelta(hours=periods - 1)
+    volumes = [100.0] * periods
+    volumes[-1] = 200.0
     return pd.DataFrame({
         "timestamp": pd.date_range(start, periods=periods, freq="h"),
         "open": [65000.0] * periods,
         "high": [65200.0] * periods,
         "low": [64800.0] * periods,
         "close": [65100.0] * periods,
-        "volume": [100.0] * periods,
+        "volume": volumes,
     })
 
 
@@ -846,3 +852,196 @@ class TestTradingGuards:
         await engine.start()
 
         assert any(s >= 300 for s in sleep_calls)
+
+
+class TestVolumeConfirmation:
+    def test_low_volume_rejected(self):
+        ohlcv = _recent_ohlcv(25)
+        ohlcv["volume"] = 100.0
+        assert not TradingEngine._check_volume_confirmation(ohlcv, 1.2)
+
+    def test_high_volume_accepted(self):
+        ohlcv = _recent_ohlcv(25)
+        ohlcv["volume"] = 100.0
+        ohlcv.loc[ohlcv.index[-1], "volume"] = 200.0
+        assert TradingEngine._check_volume_confirmation(ohlcv, 1.2)
+
+    def test_insufficient_data_passes(self):
+        ohlcv = _recent_ohlcv(10)
+        assert TradingEngine._check_volume_confirmation(ohlcv, 1.2)
+
+    async def test_volume_guard_blocks_tick(
+        self, mock_exchange, db,
+    ):
+        s = _guard_settings(
+            load_settings(), volume_min_multiplier=1.2,
+        )
+        ohlcv = _recent_ohlcv(25)
+        ohlcv["volume"] = 100.0
+        mock_exchange.get_ohlcv.return_value = ohlcv
+
+        engine = TradingEngine(
+            settings=s, exchange=mock_exchange,
+            database=db, strategies=[_buy_strategy()],
+        )
+        await engine._tick()
+        mock_exchange.create_order.assert_not_called()
+
+
+class TestEMATrendFilter:
+    def test_buy_above_ema_passes(self):
+        ohlcv = _recent_ohlcv(60)
+        ohlcv["close"] = list(range(100, 160))
+        assert TradingEngine._check_ema_trend(ohlcv, "BUY", 50) is True
+
+    def test_buy_below_ema_rejected(self):
+        ohlcv = _recent_ohlcv(60)
+        ohlcv["close"] = list(range(160, 100, -1))
+        assert TradingEngine._check_ema_trend(ohlcv, "BUY", 50) is False
+
+    def test_sell_below_ema_passes(self):
+        ohlcv = _recent_ohlcv(60)
+        ohlcv["close"] = list(range(160, 100, -1))
+        assert TradingEngine._check_ema_trend(ohlcv, "SELL", 50) is True
+
+    def test_insufficient_data_passes(self):
+        ohlcv = _recent_ohlcv(10)
+        assert TradingEngine._check_ema_trend(ohlcv, "BUY", 50) is True
+
+    async def test_ema_filter_blocks_counter_trend(
+        self, mock_exchange, db,
+    ):
+        s = _guard_settings(
+            load_settings(),
+            ema_trend_enabled=True, ema_trend_period=50,
+        )
+        ohlcv = _recent_ohlcv(60)
+        ohlcv["close"] = list(range(160, 100, -1))
+        ohlcv.loc[ohlcv.index[-1], "volume"] = 999.0
+        mock_exchange.get_ohlcv.return_value = ohlcv
+
+        engine = TradingEngine(
+            settings=s, exchange=mock_exchange,
+            database=db, strategies=[_buy_strategy()],
+        )
+        await engine._tick()
+        mock_exchange.create_order.assert_not_called()
+
+
+class TestATRStops:
+    def test_atr_stop_prices_on_position(self):
+        pos = OpenPosition(
+            symbol="BTC/USDT", amount=0.01,
+            entry_price=65000.0, peak_price=66000.0,
+            atr_at_entry=500.0, atr_stop_loss=64000.0,
+            atr_take_profit=66500.0, atr_trailing_multiplier=1.5,
+        )
+        pos.set_risk(0.03, 0.02)
+        assert pos.stop_loss_price == 64000.0
+        assert pos.trailing_stop_price == 66000.0 - 500.0 * 1.5
+        assert pos.take_profit_price == 66500.0
+
+    def test_fallback_to_pct_when_no_atr(self):
+        pos = OpenPosition(
+            symbol="BTC/USDT", amount=0.01,
+            entry_price=65000.0, peak_price=66000.0,
+        )
+        pos.set_risk(0.03, 0.02)
+        assert pos.stop_loss_price == 65000.0 * 0.97
+        assert pos.trailing_stop_price == 66000.0 * 0.98
+
+    def test_to_dict_includes_take_profit(self):
+        pos = OpenPosition(
+            symbol="BTC/USDT", amount=0.01,
+            entry_price=65000.0, peak_price=66000.0,
+            atr_at_entry=500.0, atr_stop_loss=64000.0,
+            atr_take_profit=66500.0,
+        )
+        pos.set_risk(0.03, 0.02)
+        d = pos.to_dict(65500.0)
+        assert d["take_profit_price"] == 66500.0
+        assert any("Take-profit" in c for c in d["exit_conditions"])
+
+    async def test_take_profit_triggers_partial_sell(
+        self, mock_exchange, db,
+    ):
+        s = _guard_settings(
+            load_settings(), partial_tp_ratio=0.5,
+        )
+        engine = TradingEngine(
+            settings=s, exchange=mock_exchange,
+            database=db, strategies=[_hold_strategy()],
+        )
+        pos = OpenPosition(
+            symbol="BTC/USDT", amount=0.1,
+            entry_price=65000.0, peak_price=67000.0,
+            atr_at_entry=500.0, atr_stop_loss=64000.0,
+            atr_take_profit=66500.0, atr_trailing_multiplier=1.5,
+        )
+        pos.set_risk(0.03, 0.02)
+        engine._positions["BTC/USDT"] = pos
+
+        mock_exchange.get_ticker.return_value = Ticker(
+            symbol="BTC/USDT", bid=67000.0, ask=67010.0, last=67000.0,
+        )
+        mock_exchange.get_balance.return_value = {"USDT": 5000.0, "BTC": 0.1}
+        mock_exchange.create_order.return_value = Order(
+            id="o-tp", symbol="BTC/USDT", side=OrderSide.SELL,
+            order_type=OrderType.MARKET, amount=0.05, price=67000.0,
+            status=OrderStatus.FILLED, filled_amount=0.05, filled_price=67000.0,
+        )
+
+        exited = await engine._check_position_exit("BTC/USDT")
+
+        assert exited is True
+        assert pos.partial_exits_done == 1
+        assert pos.atr_stop_loss == pos.entry_price
+        assert "BTC/USDT" in engine._positions
+
+
+class TestStrategyWeights:
+    def test_weighted_aggregation_flips_direction(self):
+        signals = [
+            Signal(
+                symbol="BTC/USDT", direction="BUY",
+                confidence=0.6, strategy_name="rsi", reason="oversold",
+            ),
+            Signal(
+                symbol="BTC/USDT", direction="SELL",
+                confidence=0.5, strategy_name="macd", reason="crossover",
+            ),
+        ]
+        result_no_weight = TradingEngine._aggregate_signals(signals)
+        assert result_no_weight.direction == "BUY"
+
+        result_weighted = TradingEngine._aggregate_signals(
+            signals, {"rsi": 0.5, "macd": 2.0},
+        )
+        assert result_weighted.direction == "SELL"
+
+    def test_equal_weights_same_as_unweighted(self):
+        signals = [
+            Signal(
+                symbol="BTC/USDT", direction="BUY",
+                confidence=0.8, strategy_name="rsi", reason="up",
+            ),
+            Signal(
+                symbol="BTC/USDT", direction="BUY",
+                confidence=0.6, strategy_name="macd", reason="up",
+            ),
+        ]
+        no_w = TradingEngine._aggregate_signals(signals)
+        with_w = TradingEngine._aggregate_signals(
+            signals, {"rsi": 1.0, "macd": 1.0},
+        )
+        assert no_w.confidence == pytest.approx(with_w.confidence)
+
+    def test_default_weight_is_one(self):
+        signals = [
+            Signal(
+                symbol="BTC/USDT", direction="BUY",
+                confidence=0.7, strategy_name="unknown_strat", reason="x",
+            ),
+        ]
+        result = TradingEngine._aggregate_signals(signals, {"rsi": 2.0})
+        assert result.confidence == pytest.approx(0.7)

@@ -44,7 +44,16 @@ async def get_config():
             "max_data_age_seconds": settings.risk.max_data_age_seconds,
             "max_price_deviation_pct": settings.risk.max_price_deviation_pct,
             "circuit_breaker_threshold": settings.risk.circuit_breaker_threshold,
+            "atr_stop_multiplier": settings.risk.atr_stop_multiplier,
+            "atr_tp_multiplier": settings.risk.atr_tp_multiplier,
+            "atr_trailing_multiplier": settings.risk.atr_trailing_multiplier,
+            "volume_min_multiplier": settings.risk.volume_min_multiplier,
+            "ema_trend_period": settings.risk.ema_trend_period,
+            "ema_trend_enabled": settings.risk.ema_trend_enabled,
+            "risk_per_trade_pct": settings.risk.risk_per_trade_pct,
+            "partial_tp_ratio": settings.risk.partial_tp_ratio,
         },
+        "strategy_weights": settings.strategies.weights,
         "strategy_params": {
             "rsi": {
                 "period": settings.strategies.rsi.period,
@@ -430,6 +439,14 @@ class RiskPatch(BaseModel):
     max_data_age_seconds: int | None = None
     max_price_deviation_pct: float | None = None
     circuit_breaker_threshold: int | None = None
+    atr_stop_multiplier: float | None = None
+    atr_tp_multiplier: float | None = None
+    atr_trailing_multiplier: float | None = None
+    volume_min_multiplier: float | None = None
+    ema_trend_period: int | None = None
+    ema_trend_enabled: bool | None = None
+    risk_per_trade_pct: float | None = None
+    partial_tp_ratio: float | None = None
 
 
 class PaperBotSettingsPatch(BaseModel):
@@ -442,6 +459,7 @@ class PaperBotSettingsPatch(BaseModel):
     macd: MACDPatch | None = None
     bollinger: BollingerPatch | None = None
     risk: RiskPatch | None = None
+    strategy_weights: dict[str, float] | None = None
 
 
 @router.get("/bot/status")
@@ -476,35 +494,42 @@ async def bot_positions():
         positions = await _positions_from_db()
 
     settings = load_settings()
-    sl_pct = settings.risk.stop_loss_pct
-    ts_pct = settings.risk.trailing_stop_pct
+    risk = settings.risk
     return {
         "positions": positions,
         "risk_config": {
-            "stop_loss_pct": sl_pct,
-            "trailing_stop_pct": ts_pct,
+            "stop_loss_pct": risk.stop_loss_pct,
+            "trailing_stop_pct": risk.trailing_stop_pct,
         },
         "exit_rules": [
             {
-                "name": "Stop-loss",
+                "name": "ATR stop-loss",
                 "description": (
-                    "Auto-sell when price drops"
-                    f" {sl_pct*100:.1f}% below entry price"
+                    f"ATR \u00d7 {risk.atr_stop_multiplier:.1f} below entry"
+                    f" (fallback: {risk.stop_loss_pct*100:.1f}% fixed)"
                 ),
-                "active": sl_pct > 0,
+                "active": True,
             },
             {
-                "name": "Trailing stop",
+                "name": "ATR trailing stop",
                 "description": (
-                    "Auto-sell when price drops"
-                    f" {ts_pct*100:.1f}% below highest price"
+                    f"ATR \u00d7 {risk.atr_trailing_multiplier:.1f} below peak"
+                    f" (fallback: {risk.trailing_stop_pct*100:.1f}% fixed)"
                 ),
-                "active": ts_pct > 0,
+                "active": True,
+            },
+            {
+                "name": "Take-profit",
+                "description": (
+                    f"ATR \u00d7 {risk.atr_tp_multiplier:.1f} above entry"
+                    f" ({risk.partial_tp_ratio:.0%} partial, rest trails)"
+                ),
+                "active": risk.atr_tp_multiplier > 0,
             },
             {
                 "name": "Strategy signal",
                 "description": (
-                    "Sell when RSI ≥ 70 (overbought),"
+                    "Sell when RSI \u2265 70 (overbought),"
                     " bearish MACD crossover, or price"
                     " above upper Bollinger band"
                 ),
@@ -588,6 +613,7 @@ async def bot_patch_settings(body: PaperBotSettingsPatch):
                 if body.risk
                 else None
             ),
+            strategy_weights=body.strategy_weights,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

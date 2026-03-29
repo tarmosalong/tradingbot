@@ -50,6 +50,7 @@ class StrategiesConfig:
     rsi: RSIConfig = field(default_factory=RSIConfig)
     macd: MACDConfig = field(default_factory=MACDConfig)
     bollinger: BollingerConfig = field(default_factory=BollingerConfig)
+    weights: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -78,6 +79,14 @@ class RiskConfig:
     max_data_age_seconds: int = 3600
     max_price_deviation_pct: float = 0.05
     circuit_breaker_threshold: int = 5
+    atr_stop_multiplier: float = 2.0
+    atr_tp_multiplier: float = 3.0
+    atr_trailing_multiplier: float = 1.5
+    volume_min_multiplier: float = 1.2
+    ema_trend_period: int = 50
+    ema_trend_enabled: bool = True
+    risk_per_trade_pct: float = 0.01
+    partial_tp_ratio: float = 0.5
 
 
 @dataclass(frozen=True)
