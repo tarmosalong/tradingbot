@@ -257,6 +257,65 @@ class Database:
             for row in rows
         ]
 
+    async def get_net_positions(self) -> list[dict]:
+        """Reconstruct open positions from trade history.
+
+        Computes net holdings per symbol using weighted average
+        entry price across all BUY/SELL trades.
+        """
+        conn = self._ensure_connected()
+        cursor = await conn.execute(
+            "SELECT symbol, side, amount, price, executed_at"
+            " FROM trades ORDER BY executed_at ASC",
+        )
+        rows = await cursor.fetchall()
+
+        positions: dict[str, dict] = {}
+        for row in rows:
+            symbol = row["symbol"]
+            side = row["side"]
+            amount = row["amount"]
+            price = row["price"]
+            ts = row["executed_at"]
+
+            if symbol not in positions:
+                positions[symbol] = {
+                    "amount": 0.0,
+                    "cost_basis": 0.0,
+                    "peak_price": 0.0,
+                    "opened_at": ts,
+                }
+
+            pos = positions[symbol]
+            if side == "BUY":
+                new_cost = pos["cost_basis"] + (amount * price)
+                pos["amount"] += amount
+                pos["cost_basis"] = new_cost
+                if price > pos["peak_price"]:
+                    pos["peak_price"] = price
+            elif side == "SELL":
+                if pos["amount"] > 0:
+                    ratio = min(amount / pos["amount"], 1.0)
+                    pos["cost_basis"] *= (1.0 - ratio)
+                pos["amount"] -= amount
+
+        result = []
+        for symbol, pos in positions.items():
+            if pos["amount"] > 1e-10:
+                entry = (
+                    pos["cost_basis"] / pos["amount"]
+                    if pos["amount"] > 0
+                    else 0.0
+                )
+                result.append({
+                    "symbol": symbol,
+                    "amount": pos["amount"],
+                    "entry_price": entry,
+                    "peak_price": pos["peak_price"],
+                    "opened_at": pos["opened_at"],
+                })
+        return result
+
     @staticmethod
     def _row_to_trade(row: aiosqlite.Row) -> Trade:
         return Trade(

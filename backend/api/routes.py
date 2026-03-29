@@ -370,6 +370,10 @@ async def bot_stop():
 @router.get("/bot/positions")
 async def bot_positions():
     positions = await bot_runner.get_positions()
+
+    if not positions:
+        positions = await _positions_from_db()
+
     settings = load_settings()
     sl_pct = settings.risk.stop_loss_pct
     ts_pct = settings.risk.trailing_stop_pct
@@ -383,30 +387,72 @@ async def bot_positions():
             {
                 "name": "Stop-loss",
                 "description": (
-                    "Automaatne müük kui hind langeb"
-                    f" {sl_pct*100:.1f}% alla ostuhinna"
+                    "Auto-sell when price drops"
+                    f" {sl_pct*100:.1f}% below entry price"
                 ),
                 "active": sl_pct > 0,
             },
             {
                 "name": "Trailing stop",
                 "description": (
-                    "Automaatne müük kui hind langeb"
-                    f" {ts_pct*100:.1f}% alla kõrgeima hinna"
+                    "Auto-sell when price drops"
+                    f" {ts_pct*100:.1f}% below highest price"
                 ),
                 "active": ts_pct > 0,
             },
             {
-                "name": "Strateegia signaal",
+                "name": "Strategy signal",
                 "description": (
-                    "Müük kui RSI ≥ 70 (üleostetud),"
-                    " MACD langev ristmik või hind"
-                    " üle Bollingeri ülemise piiri"
+                    "Sell when RSI ≥ 70 (overbought),"
+                    " bearish MACD crossover, or price"
+                    " above upper Bollinger band"
                 ),
                 "active": True,
             },
         ],
     }
+
+
+async def _positions_from_db() -> list[dict]:
+    """Reconstruct positions from trade history (survives restarts)."""
+    db = get_database()
+    if db is None:
+        return []
+
+    settings = load_settings()
+    sl_pct = settings.risk.stop_loss_pct
+    ts_pct = settings.risk.trailing_stop_pct
+
+    raw = await db.get_net_positions()
+    result = []
+    for p in raw:
+        from backend.core.engine import OpenPosition
+
+        pos = OpenPosition(
+            symbol=p["symbol"],
+            amount=p["amount"],
+            entry_price=p["entry_price"],
+            peak_price=p["peak_price"],
+            opened_at=datetime.fromisoformat(p["opened_at"]),
+        )
+        pos.set_risk(sl_pct, ts_pct)
+
+        try:
+            from backend.exchange.binance_client import BinanceClient
+
+            settings_for_price = load_settings()
+            client = BinanceClient(settings_for_price)
+            ticker = await client.get_ticker(p["symbol"])
+            current_price = ticker.last
+            await client.close()
+        except Exception:
+            current_price = p["entry_price"]
+
+        if current_price > pos.peak_price:
+            pos.peak_price = current_price
+
+        result.append(pos.to_dict(current_price))
+    return result
 
 
 @router.patch("/bot/settings")
