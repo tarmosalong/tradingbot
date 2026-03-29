@@ -13,12 +13,52 @@ export function ConfigPanel({ config }: ConfigPanelProps) {
     );
   }
 
+  const isPaper = config.mode === 'paper';
+
   return (
-    <div className="bg-[var(--bg-card)] rounded-lg border border-[var(--border)]">
+    <div className="bg-[var(--bg-card)] rounded-lg border border-[var(--border)] space-y-4">
       <div className="px-4 py-3 border-b border-[var(--border)]">
         <h2 className="text-sm font-medium text-[var(--text-secondary)]">Bot Configuration</h2>
       </div>
-      <div className="p-4 grid grid-cols-2 gap-3 text-sm">
+
+      {isPaper && (
+        <div className="mx-4 -mt-2 rounded-lg border border-[var(--accent-blue)]/35 bg-[var(--accent-blue)]/5 px-3 py-3 text-sm">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--accent-blue)] mb-2">
+            Paper trading
+          </h3>
+          <p className="text-[var(--text-secondary)] text-xs leading-relaxed mb-2">
+            Simulated balance with live Binance prices. Change balance, pairs, and timing in{' '}
+            <code className="text-[var(--text-primary)] bg-[var(--bg-secondary)] px-1 rounded">
+              config.yaml
+            </code>{' '}
+            (<code className="text-[var(--text-primary)] bg-[var(--bg-secondary)] px-1 rounded">
+              paper_trading.initial_balance_usdt
+            </code>
+            ,{' '}
+            <code className="text-[var(--text-primary)] bg-[var(--bg-secondary)] px-1 rounded">
+              trading.*
+            </code>
+            ), then restart the bot process.
+          </p>
+          <InfoRow
+            label="Starting balance (config)"
+            value={
+              config.paper_trading != null
+                ? `$${config.paper_trading.initial_balance_usdt.toLocaleString()}`
+                : '—'
+            }
+          />
+          <p className="text-[var(--text-secondary)] text-xs mt-2 pt-2 border-t border-[var(--border)]/60">
+            Run the loop:{' '}
+            <code className="text-[var(--accent-green)] bg-[var(--bg-secondary)] px-1 rounded text-[11px]">
+              python -m backend.main
+            </code>
+            — this dashboard only shows data already saved to the database.
+          </p>
+        </div>
+      )}
+
+      <div className="p-4 pt-0 grid grid-cols-2 gap-3 text-sm">
         <InfoRow label="Pairs" value={config.pairs.join(', ')} />
         <InfoRow label="Timeframe" value={config.timeframe} />
         <InfoRow label="Poll Interval" value={`${config.poll_interval}s`} />

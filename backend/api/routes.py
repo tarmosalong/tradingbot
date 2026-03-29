@@ -25,6 +25,9 @@ async def get_config():
         "timeframe": settings.trading.timeframe,
         "poll_interval": settings.trading.poll_interval_seconds,
         "strategies": settings.strategies.enabled,
+        "paper_trading": {
+            "initial_balance_usdt": settings.paper_trading.initial_balance_usdt,
+        },
         "risk": {
             "max_position_pct": settings.risk.max_position_pct,
             "stop_loss_pct": settings.risk.stop_loss_pct,

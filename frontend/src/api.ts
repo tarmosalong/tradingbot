@@ -36,6 +36,9 @@ export interface BotConfig {
   timeframe: string;
   poll_interval: number;
   strategies: string[];
+  paper_trading?: {
+    initial_balance_usdt: number;
+  };
   risk: {
     max_position_pct: number;
     stop_loss_pct: number;

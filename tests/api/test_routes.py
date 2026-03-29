@@ -51,6 +51,8 @@ class TestConfigEndpoint:
         assert "mode" in data
         assert "pairs" in data
         assert "risk" in data
+        assert "paper_trading" in data
+        assert "initial_balance_usdt" in data["paper_trading"]
 
 
 class TestTradesEndpoint:

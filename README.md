@@ -732,7 +732,7 @@ graph TD
 
     DASH --> SP["StatsPanel<br/>4 stat cards"]
     DASH --> PC["PortfolioChart<br/>Equity curve"]
-    DASH --> CP["ConfigPanel<br/>Bot settings"]
+    DASH --> CP["ConfigPanel<br/>Bot settings + paper trading info"]
     DASH --> TT["TradesTable<br/>Recent trades"]
 
     BTP --> FORM["Input Form<br/>Symbol, dates, balance"]
@@ -769,7 +769,7 @@ All REST endpoints are prefixed with `/api`.
 | Method | Path | Parameters | Response |
 |--------|------|------------|----------|
 | `GET` | `/api/health` | — | `{"status": "ok"}` |
-| `GET` | `/api/config` | — | Bot configuration (mode, pairs, risk etc) |
+| `GET` | `/api/config` | — | Bot configuration (mode, pairs, `paper_trading.initial_balance_usdt`, risk, strategies) |
 | `GET` | `/api/trades` | `?symbol=&limit=50` | List of trades |
 | `GET` | `/api/orders` | `?symbol=` | Open orders |
 | `GET` | `/api/portfolio` | `?limit=100` | Portfolio history |
