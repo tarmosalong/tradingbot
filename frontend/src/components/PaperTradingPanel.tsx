@@ -32,6 +32,98 @@ const POPULAR_SYMBOLS = [
   'XRP/USDT', 'ADA/USDT', 'DOGE/USDT', 'AVAX/USDT',
 ];
 
+interface ParamProfile {
+  label: string;
+  desc: string;
+  icon: string;
+  rsi: { period: number; oversold: number; overbought: number };
+  macd: { fast: number; slow: number; signal: number };
+  bollinger: { period: number; std_dev: number };
+  risk: {
+    maxPos: number;
+    stopLoss: number;
+    trailingStop: number;
+    maxDrawdown: number;
+    dailyLoss: number;
+    maxOrder: number;
+  };
+}
+
+const PROFILES: Record<string, ParamProfile> = {
+  conservative: {
+    label: 'Conservative',
+    desc: 'Low risk, wide stops, small positions. Best for beginners or volatile markets.',
+    icon: '\u{1F6E1}',
+    rsi: { period: 14, oversold: 25, overbought: 75 },
+    macd: { fast: 12, slow: 26, signal: 9 },
+    bollinger: { period: 20, std_dev: 2.5 },
+    risk: { maxPos: 5, stopLoss: 5, trailingStop: 3, maxDrawdown: 10, dailyLoss: 3, maxOrder: 500 },
+  },
+  balanced: {
+    label: 'Balanced',
+    desc: 'Standard settings. Good balance of risk and reward for most conditions.',
+    icon: '\u2696',
+    rsi: { period: 14, oversold: 30, overbought: 70 },
+    macd: { fast: 12, slow: 26, signal: 9 },
+    bollinger: { period: 20, std_dev: 2.0 },
+    risk: { maxPos: 10, stopLoss: 3, trailingStop: 2, maxDrawdown: 20, dailyLoss: 5, maxOrder: 1000 },
+  },
+  aggressive: {
+    label: 'Aggressive',
+    desc: 'Higher risk, tighter triggers, larger positions. More trades, more potential reward.',
+    icon: '\u{1F525}',
+    rsi: { period: 10, oversold: 35, overbought: 65 },
+    macd: { fast: 8, slow: 21, signal: 5 },
+    bollinger: { period: 15, std_dev: 1.5 },
+    risk: { maxPos: 20, stopLoss: 2, trailingStop: 1, maxDrawdown: 30, dailyLoss: 10, maxOrder: 3000 },
+  },
+  scalper: {
+    label: 'Scalper',
+    desc: 'Very short-term, fast signals, tight stops. For high-frequency paper trading.',
+    icon: '\u26A1',
+    rsi: { period: 7, oversold: 35, overbought: 65 },
+    macd: { fast: 5, slow: 13, signal: 4 },
+    bollinger: { period: 10, std_dev: 1.5 },
+    risk: { maxPos: 15, stopLoss: 1, trailingStop: 1, maxDrawdown: 15, dailyLoss: 5, maxOrder: 2000 },
+  },
+  hodl: {
+    label: 'HODL',
+    desc: 'Long-term signals only. Wide filters, large stops, fewer trades. Ride the trend.',
+    icon: '\u{1F4C8}',
+    rsi: { period: 21, oversold: 20, overbought: 80 },
+    macd: { fast: 16, slow: 36, signal: 12 },
+    bollinger: { period: 30, std_dev: 2.5 },
+    risk: { maxPos: 10, stopLoss: 8, trailingStop: 5, maxDrawdown: 25, dailyLoss: 8, maxOrder: 2000 },
+  },
+};
+
+function detectProfile(cfg: BotConfig): string | null {
+  const sp = cfg.strategy_params;
+  const r = cfg.risk;
+  if (!sp) return null;
+  for (const [id, p] of Object.entries(PROFILES)) {
+    if (
+      sp.rsi.period === p.rsi.period &&
+      sp.rsi.oversold === p.rsi.oversold &&
+      sp.rsi.overbought === p.rsi.overbought &&
+      sp.macd.fast === p.macd.fast &&
+      sp.macd.slow === p.macd.slow &&
+      sp.macd.signal === p.macd.signal &&
+      sp.bollinger.period === p.bollinger.period &&
+      sp.bollinger.std_dev === p.bollinger.std_dev &&
+      Math.round(r.max_position_pct * 100) === p.risk.maxPos &&
+      Math.round(r.stop_loss_pct * 100) === p.risk.stopLoss &&
+      Math.round(r.trailing_stop_pct * 100) === p.risk.trailingStop &&
+      Math.round(r.max_drawdown_pct * 100) === p.risk.maxDrawdown &&
+      Math.round(r.daily_loss_limit_pct * 100) === p.risk.dailyLoss &&
+      r.max_single_order_usdt === p.risk.maxOrder
+    ) {
+      return id;
+    }
+  }
+  return null;
+}
+
 interface PaperTradingPanelProps {
   config: BotConfig | null;
   onConfigRefresh: () => void;
@@ -63,6 +155,8 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
   const [riskMaxDrawdown, setRiskMaxDrawdown] = useState(20);
   const [riskDailyLoss, setRiskDailyLoss] = useState(5);
   const [riskMaxOrder, setRiskMaxOrder] = useState(1000);
+
+  const [activeProfile, setActiveProfile] = useState<string | null>(null);
 
   const [msg, setMsg] = useState<string | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
@@ -125,6 +219,8 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
     setRiskMaxDrawdown(Math.round(r.max_drawdown_pct * 100));
     setRiskDailyLoss(Math.round(r.daily_loss_limit_pct * 100));
     setRiskMaxOrder(r.max_single_order_usdt);
+
+    setActiveProfile(detectProfile(config));
   }, [config]);
 
   const state: BotRunnerState | null = status?.state ?? null;
@@ -200,6 +296,30 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
     } finally {
       setBusy(false);
     }
+  }
+
+  function setAndClear<T>(setter: (v: T) => void) {
+    return (v: T) => { setter(v); setActiveProfile(null); };
+  }
+
+  function applyProfile(id: string) {
+    const p = PROFILES[id];
+    if (!p) return;
+    setRsiPeriod(p.rsi.period);
+    setRsiOversold(p.rsi.oversold);
+    setRsiOverbought(p.rsi.overbought);
+    setMacdFast(p.macd.fast);
+    setMacdSlow(p.macd.slow);
+    setMacdSignal(p.macd.signal);
+    setBollPeriod(p.bollinger.period);
+    setBollStdDev(p.bollinger.std_dev);
+    setRiskMaxPos(p.risk.maxPos);
+    setRiskStopLoss(p.risk.stopLoss);
+    setRiskTrailingStop(p.risk.trailingStop);
+    setRiskMaxDrawdown(p.risk.maxDrawdown);
+    setRiskDailyLoss(p.risk.dailyLoss);
+    setRiskMaxOrder(p.risk.maxOrder);
+    setActiveProfile(id);
   }
 
   function toggleStrategy(key: string) {
@@ -379,14 +499,64 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
 
         {showAdvanced && (
           <div className="space-y-4 border-t border-[var(--border)] pt-4">
+            {/* Profiles */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-xs font-medium text-[var(--text-secondary)]">Profiles</h3>
+                <button
+                  type="button"
+                  onClick={() => applyProfile('balanced')}
+                  disabled={!editable}
+                  className="text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed transition-colors"
+                >
+                  Reset to Defaults
+                </button>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
+                {Object.entries(PROFILES).map(([id, p]) => {
+                  const isActive = activeProfile === id;
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => applyProfile(id)}
+                      disabled={!editable}
+                      title={p.desc}
+                      className={`relative px-3 py-2 rounded-lg text-left border transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+                        isActive
+                          ? 'bg-[var(--accent)]/10 border-[var(--accent)] ring-1 ring-[var(--accent)]/30'
+                          : 'bg-[var(--bg-secondary)] border-[var(--border)] hover:border-[var(--text-secondary)]'
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <span className="text-sm">{p.icon}</span>
+                        <span className={`text-xs font-medium ${isActive ? 'text-[var(--accent)]' : ''}`}>
+                          {p.label}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-[var(--text-secondary)] leading-tight line-clamp-2">{p.desc}</p>
+                      {isActive && (
+                        <span className="absolute top-1 right-1.5 text-[var(--accent)] text-[10px] font-bold">{'\u2713'}</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+              {activeProfile === null && (
+                <p className="text-[10px] text-[var(--text-secondary)] mt-1.5 italic">
+                  Custom settings — does not match any profile
+                </p>
+              )}
+            </div>
+
             {/* RSI Parameters */}
             {selected.has('rsi') && (
               <div>
                 <h3 className="text-xs font-medium text-[var(--accent)] mb-2">RSI Parameters</h3>
                 <div className="grid grid-cols-3 gap-3">
-                  <ParamSlider label="Period" value={rsiPeriod} onChange={setRsiPeriod} min={2} max={50} disabled={!editable} tooltip="Number of candles used to calculate RSI. Lower = more sensitive, higher = smoother. Default: 14" />
-                  <ParamSlider label="Oversold" value={rsiOversold} onChange={setRsiOversold} min={5} max={45} disabled={!editable} tooltip="RSI level below which the asset is considered oversold (BUY signal). Default: 30" />
-                  <ParamSlider label="Overbought" value={rsiOverbought} onChange={setRsiOverbought} min={55} max={95} disabled={!editable} tooltip="RSI level above which the asset is considered overbought (SELL signal). Default: 70" />
+                  <ParamSlider label="Period" value={rsiPeriod} onChange={setAndClear(setRsiPeriod)} min={2} max={50} disabled={!editable} tooltip="Number of candles used to calculate RSI. Lower = more sensitive, higher = smoother. Default: 14" />
+                  <ParamSlider label="Oversold" value={rsiOversold} onChange={setAndClear(setRsiOversold)} min={5} max={45} disabled={!editable} tooltip="RSI level below which the asset is considered oversold (BUY signal). Default: 30" />
+                  <ParamSlider label="Overbought" value={rsiOverbought} onChange={setAndClear(setRsiOverbought)} min={55} max={95} disabled={!editable} tooltip="RSI level above which the asset is considered overbought (SELL signal). Default: 70" />
                 </div>
               </div>
             )}
@@ -396,9 +566,9 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
               <div>
                 <h3 className="text-xs font-medium text-[var(--accent)] mb-2">MACD Parameters</h3>
                 <div className="grid grid-cols-3 gap-3">
-                  <ParamSlider label="Fast EMA" value={macdFast} onChange={setMacdFast} min={2} max={50} disabled={!editable} tooltip="Period for the fast Exponential Moving Average. Default: 12" />
-                  <ParamSlider label="Slow EMA" value={macdSlow} onChange={setMacdSlow} min={10} max={100} disabled={!editable} tooltip="Period for the slow Exponential Moving Average. Must be larger than fast. Default: 26" />
-                  <ParamSlider label="Signal" value={macdSignal} onChange={setMacdSignal} min={2} max={50} disabled={!editable} tooltip="Period for the signal line (EMA of MACD). Default: 9" />
+                  <ParamSlider label="Fast EMA" value={macdFast} onChange={setAndClear(setMacdFast)} min={2} max={50} disabled={!editable} tooltip="Period for the fast Exponential Moving Average. Default: 12" />
+                  <ParamSlider label="Slow EMA" value={macdSlow} onChange={setAndClear(setMacdSlow)} min={10} max={100} disabled={!editable} tooltip="Period for the slow Exponential Moving Average. Must be larger than fast. Default: 26" />
+                  <ParamSlider label="Signal" value={macdSignal} onChange={setAndClear(setMacdSignal)} min={2} max={50} disabled={!editable} tooltip="Period for the signal line (EMA of MACD). Default: 9" />
                 </div>
               </div>
             )}
@@ -408,8 +578,8 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
               <div>
                 <h3 className="text-xs font-medium text-[var(--accent)] mb-2">Bollinger Bands Parameters</h3>
                 <div className="grid grid-cols-2 gap-3">
-                  <ParamSlider label="Period" value={bollPeriod} onChange={setBollPeriod} min={5} max={50} disabled={!editable} tooltip="Number of candles for the middle band moving average. Default: 20" />
-                  <ParamSlider label="Std Dev" value={bollStdDev} onChange={setBollStdDev} min={0.5} max={4} step={0.1} disabled={!editable} tooltip="Standard deviations for upper/lower bands. Higher = wider bands = fewer signals. Default: 2.0" />
+                  <ParamSlider label="Period" value={bollPeriod} onChange={setAndClear(setBollPeriod)} min={5} max={50} disabled={!editable} tooltip="Number of candles for the middle band moving average. Default: 20" />
+                  <ParamSlider label="Std Dev" value={bollStdDev} onChange={setAndClear(setBollStdDev)} min={0.5} max={4} step={0.1} disabled={!editable} tooltip="Standard deviations for upper/lower bands. Higher = wider bands = fewer signals. Default: 2.0" />
                 </div>
               </div>
             )}
@@ -418,12 +588,12 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
             <div>
               <h3 className="text-xs font-medium text-[var(--accent-red)] mb-2">Risk Management</h3>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                <ParamSlider label="Max Position %" value={riskMaxPos} onChange={setRiskMaxPos} min={1} max={100} disabled={!editable} tooltip="Maximum percentage of balance for a single position. Lower = more conservative. Default: 10%" />
-                <ParamSlider label="Stop Loss %" value={riskStopLoss} onChange={setRiskStopLoss} min={0} max={20} step={0.5} disabled={!editable} tooltip="Fixed stop-loss percentage below entry price. Default: 3%" />
-                <ParamSlider label="Trailing Stop %" value={riskTrailingStop} onChange={setRiskTrailingStop} min={0} max={20} step={0.5} disabled={!editable} tooltip="Dynamic stop that follows price upward. Triggers when price drops this % from peak. Default: 2%" />
-                <ParamSlider label="Max Drawdown %" value={riskMaxDrawdown} onChange={setRiskMaxDrawdown} min={1} max={50} disabled={!editable} tooltip="If total portfolio drops this % from highest point, trading halts. Default: 20%" />
-                <ParamSlider label="Daily Loss Limit %" value={riskDailyLoss} onChange={setRiskDailyLoss} min={1} max={50} disabled={!editable} tooltip="Maximum loss allowed in a single day. Default: 5%" />
-                <ParamSlider label="Max Order (USDT)" value={riskMaxOrder} onChange={setRiskMaxOrder} min={10} max={100000} step={10} disabled={!editable} tooltip="Maximum value (USDT) for a single order. Default: $1,000" />
+                <ParamSlider label="Max Position %" value={riskMaxPos} onChange={setAndClear(setRiskMaxPos)} min={1} max={100} disabled={!editable} tooltip="Maximum percentage of balance for a single position. Lower = more conservative. Default: 10%" />
+                <ParamSlider label="Stop Loss %" value={riskStopLoss} onChange={setAndClear(setRiskStopLoss)} min={0} max={20} step={0.5} disabled={!editable} tooltip="Fixed stop-loss percentage below entry price. Default: 3%" />
+                <ParamSlider label="Trailing Stop %" value={riskTrailingStop} onChange={setAndClear(setRiskTrailingStop)} min={0} max={20} step={0.5} disabled={!editable} tooltip="Dynamic stop that follows price upward. Triggers when price drops this % from peak. Default: 2%" />
+                <ParamSlider label="Max Drawdown %" value={riskMaxDrawdown} onChange={setAndClear(setRiskMaxDrawdown)} min={1} max={50} disabled={!editable} tooltip="If total portfolio drops this % from highest point, trading halts. Default: 20%" />
+                <ParamSlider label="Daily Loss Limit %" value={riskDailyLoss} onChange={setAndClear(setRiskDailyLoss)} min={1} max={50} disabled={!editable} tooltip="Maximum loss allowed in a single day. Default: 5%" />
+                <ParamSlider label="Max Order (USDT)" value={riskMaxOrder} onChange={setAndClear(setRiskMaxOrder)} min={10} max={100000} step={10} disabled={!editable} tooltip="Maximum value (USDT) for a single order. Default: $1,000" />
               </div>
             </div>
           </div>
