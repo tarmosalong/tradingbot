@@ -39,6 +39,11 @@ async def get_config():
             "max_drawdown_pct": settings.risk.max_drawdown_pct,
             "daily_loss_limit_pct": settings.risk.daily_loss_limit_pct,
             "max_single_order_usdt": settings.risk.max_single_order_usdt,
+            "min_confidence": settings.risk.min_confidence,
+            "max_concurrent_positions": settings.risk.max_concurrent_positions,
+            "max_data_age_seconds": settings.risk.max_data_age_seconds,
+            "max_price_deviation_pct": settings.risk.max_price_deviation_pct,
+            "circuit_breaker_threshold": settings.risk.circuit_breaker_threshold,
         },
         "strategy_params": {
             "rsi": {
@@ -420,6 +425,11 @@ class RiskPatch(BaseModel):
     max_drawdown_pct: float | None = None
     daily_loss_limit_pct: float | None = None
     max_single_order_usdt: float | None = None
+    min_confidence: float | None = None
+    max_concurrent_positions: int | None = None
+    max_data_age_seconds: int | None = None
+    max_price_deviation_pct: float | None = None
+    circuit_breaker_threshold: int | None = None
 
 
 class PaperBotSettingsPatch(BaseModel):

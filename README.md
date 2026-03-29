@@ -298,6 +298,11 @@ If both `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are present in `.env`, `load
 | `max_drawdown_pct` | float | `0.15` | Max drawdown before trading halt |
 | `daily_loss_limit_pct` | float | `0.05` | Daily loss limit |
 | `max_single_order_usdt` | float | `1000.0` | Max single order value in USDT |
+| `min_confidence` | float | `0.4` | Min aggregated signal confidence to execute a trade |
+| `max_concurrent_positions` | int | `3` | Max simultaneous open positions |
+| `max_data_age_seconds` | int | `3600` | Max OHLCV candle age before data is considered stale |
+| `max_price_deviation_pct` | float | `0.05` | Max allowed price deviation from last close (anti-glitch) |
+| `circuit_breaker_threshold` | int | `5` | Consecutive tick errors before 5-min pause |
 
 #### BacktestConfig
 | Field | Type | Default | Description |
@@ -690,6 +695,21 @@ Optional second opinion for live **AI filter strategy** signals. Multiple `LLMPr
 ---
 
 ## Risk Management
+
+### Live Engine Guards
+
+The live/paper trading engine applies the following guards on every tick:
+
+| Guard | Config Field | Behaviour |
+|-------|-------------|-----------|
+| **RiskManager integration** | `max_drawdown_pct`, `daily_loss_limit_pct` | Portfolio-level drawdown halts all trading; daily loss limit skips the tick |
+| **Min confidence** | `min_confidence` | Aggregated signals below this threshold are ignored |
+| **Stale data** | `max_data_age_seconds` | If the latest OHLCV candle is older than this, the symbol is skipped |
+| **Max concurrent positions** | `max_concurrent_positions` | New BUYs are blocked when this many positions are already open |
+| **Price sanity** | `max_price_deviation_pct` | If the ticker price deviates more than this % from the last candle close, the trade is rejected |
+| **Circuit breaker** | `circuit_breaker_threshold` | After N consecutive tick errors, the engine pauses for 5 minutes |
+| **Duplicate BUY block** | — | Skips BUY if already holding a position for that symbol |
+| **Trade cooldown** | `poll_interval_seconds × 3` | Prevents rapid-fire BUYs on the same symbol |
 
 ### Risk Controls in Backtest
 

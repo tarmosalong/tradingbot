@@ -12,6 +12,7 @@ from backend.core.logger import get_logger
 from backend.database import Database
 from backend.exchange.base import ExchangeBase
 from backend.models import OrderSide, Signal, Trade
+from backend.risk.manager import RiskManager
 from backend.strategies.base import StrategyBase
 
 if TYPE_CHECKING:
@@ -51,7 +52,11 @@ class OpenPosition:
 
     def to_dict(self, current_price: float) -> dict:
         pnl = (current_price - self.entry_price) * self.amount
-        pnl_pct = ((current_price / self.entry_price) - 1) * 100 if self.entry_price else 0
+        pnl_pct = (
+            ((current_price / self.entry_price) - 1) * 100
+            if self.entry_price
+            else 0
+        )
         return {
             "symbol": self.symbol,
             "amount": self.amount,
@@ -74,7 +79,7 @@ class OpenPosition:
                     f" ${self.peak_price:,.2f})"
                 ),
                 (
-                    "Strategy SELL signal (RSI ≥ 70 or MACD bearish"
+                    "Strategy SELL signal (RSI \u2265 70 or MACD bearish"
                     " crossover or price above Bollinger upper band)"
                 ),
             ],
@@ -100,6 +105,9 @@ class TradingEngine:
         self._running = False
         self._positions: dict[str, OpenPosition] = {}
         self._last_trade_time: dict[str, datetime] = {}
+        self._consecutive_errors = 0
+        self._risk_manager = RiskManager(settings.risk, database)
+        self._halted = False
 
     @property
     def is_running(self) -> bool:
@@ -108,28 +116,56 @@ class TradingEngine:
     async def start(self) -> None:
         """Start the trading loop."""
         self._running = True
+        self._consecutive_errors = 0
+        self._halted = False
+
+        portfolio_val = await self._get_portfolio_value()
+        self._risk_manager.set_initial_portfolio_value(portfolio_val)
+
         logger.info(
             "Engine started",
             mode=self._settings.trading.mode,
             pairs=self._settings.trading.pairs,
             strategies=[s.name for s in self._strategies],
+            portfolio_value=portfolio_val,
         )
 
         while self._running:
             try:
                 await self._tick()
+                self._consecutive_errors = 0
             except asyncio.CancelledError:
                 logger.info("Engine cancelled, shutting down")
                 break
             except Exception:
-                logger.exception("Unexpected error in trading loop")
-                await self._notify_alert(
-                    "Unexpected error in trading loop — check logs",
-                    "ERROR",
+                self._consecutive_errors += 1
+                logger.exception(
+                    "Unexpected error in trading loop",
+                    consecutive_errors=self._consecutive_errors,
                 )
 
+                threshold = self._settings.risk.circuit_breaker_threshold
+                if self._consecutive_errors >= threshold:
+                    logger.error(
+                        "Circuit breaker triggered — pausing 5 minutes",
+                        errors=self._consecutive_errors,
+                        threshold=threshold,
+                    )
+                    await self._notify_alert(
+                        f"Circuit breaker: {self._consecutive_errors}"
+                        " consecutive errors — pausing 5 min",
+                        "ERROR",
+                    )
+                    await asyncio.sleep(300)
+                    self._consecutive_errors = 0
+                else:
+                    await self._notify_alert(
+                        "Unexpected error in trading loop — check logs",
+                        "ERROR",
+                    )
+
             await asyncio.sleep(
-                self._settings.trading.poll_interval_seconds
+                self._settings.trading.poll_interval_seconds,
             )
 
         self._running = False
@@ -155,6 +191,30 @@ class TradingEngine:
 
     async def _tick(self) -> None:
         """Single iteration: fetch data, analyze, optionally trade."""
+        risk = self._settings.risk
+
+        if self._halted:
+            return
+
+        portfolio_val = await self._get_portfolio_value()
+        health = self._risk_manager.check_portfolio_health(portfolio_val)
+        if not health.approved:
+            if "drawdown" in health.reason.lower():
+                self._halted = True
+                logger.error(
+                    "Trading halted — drawdown limit breached",
+                    reason=health.reason,
+                )
+                await self._notify_alert(
+                    f"HALTED: {health.reason}", "ERROR",
+                )
+            else:
+                logger.warning(
+                    "Skipping tick — daily loss limit reached",
+                    reason=health.reason,
+                )
+            return
+
         for symbol in self._settings.trading.pairs:
             try:
                 ohlcv = await self._exchange.get_ohlcv(
@@ -164,6 +224,14 @@ class TradingEngine:
                 )
             except ExchangeError:
                 logger.exception("Failed to fetch OHLCV", symbol=symbol)
+                continue
+
+            if self._is_data_stale(ohlcv, risk.max_data_age_seconds):
+                logger.warning(
+                    "Stale data — skipping symbol",
+                    symbol=symbol,
+                    max_age_s=risk.max_data_age_seconds,
+                )
                 continue
 
             exited = await self._check_position_exit(symbol)
@@ -192,8 +260,29 @@ class TradingEngine:
             if combined.direction == "HOLD":
                 continue
 
-            await self._execute_signal(combined)
+            if combined.confidence < risk.min_confidence:
+                logger.info(
+                    "Signal below min confidence — skipping",
+                    symbol=symbol,
+                    confidence=combined.confidence,
+                    min_confidence=risk.min_confidence,
+                )
+                continue
+
+            last_close = float(ohlcv["close"].iloc[-1])
+            await self._execute_signal(combined, last_close)
             await self._snapshot_portfolio()
+
+    @staticmethod
+    def _is_data_stale(ohlcv, max_age_seconds: int) -> bool:
+        if ohlcv is None or ohlcv.empty:
+            return True
+        latest_ts = ohlcv["timestamp"].iloc[-1]
+        now = datetime.now(UTC)
+        if hasattr(latest_ts, "tzinfo") and latest_ts.tzinfo is None:
+            now = now.replace(tzinfo=None)
+        age = (now - latest_ts).total_seconds()
+        return age > max_age_seconds
 
     async def _collect_signals(self, symbol, ohlcv) -> list[Signal]:
         """Run all strategies and collect their signals."""
@@ -280,7 +369,10 @@ class TradingEngine:
             try:
                 await self._db.insert_signal(sig)
             except Exception:
-                logger.debug("Failed to persist signal", strategy=sig.strategy_name)
+                logger.debug(
+                    "Failed to persist signal",
+                    strategy=sig.strategy_name,
+                )
 
     async def _broadcast_signal(self, signal: Signal) -> None:
         try:
@@ -300,7 +392,7 @@ class TradingEngine:
             logger.debug("Signal broadcast failed")
 
     async def _check_position_exit(self, symbol: str) -> bool:
-        """Check if an open position should be closed by stop-loss or trailing stop."""
+        """Check if an open position should be closed."""
         pos = self._positions.get(symbol)
         if not pos:
             return False
@@ -355,8 +447,14 @@ class TradingEngine:
         await self._execute_signal(signal)
         return True
 
-    async def _execute_signal(self, signal: Signal) -> None:
+    async def _execute_signal(
+        self,
+        signal: Signal,
+        last_close: float | None = None,
+    ) -> None:
         """Execute a trading signal via the exchange."""
+        risk = self._settings.risk
+
         if signal.direction == "BUY":
             existing = self._positions.get(signal.symbol)
             if existing:
@@ -368,10 +466,22 @@ class TradingEngine:
                 )
                 return
 
+            max_concurrent = risk.max_concurrent_positions
+            if len(self._positions) >= max_concurrent:
+                logger.info(
+                    "Skipping BUY — max concurrent positions reached",
+                    symbol=signal.symbol,
+                    open_positions=len(self._positions),
+                    max_concurrent=max_concurrent,
+                )
+                return
+
             last_buy_ts = self._last_trade_time.get(signal.symbol)
             cooldown = self._settings.trading.poll_interval_seconds * 3
             if last_buy_ts is not None:
-                elapsed = (datetime.now(UTC) - last_buy_ts).total_seconds()
+                elapsed = (
+                    datetime.now(UTC) - last_buy_ts
+                ).total_seconds()
                 if elapsed < cooldown:
                     logger.info(
                         "Skipping BUY — cooldown active",
@@ -383,16 +493,45 @@ class TradingEngine:
 
         balance = await self._exchange.get_balance()
         ticker = await self._exchange.get_ticker(signal.symbol)
-        base, quote = signal.symbol.split("/")
 
-        max_order = self._settings.risk.max_single_order_usdt
-        position_pct = self._settings.risk.max_position_pct
+        if last_close and last_close > 0:
+            deviation = abs(ticker.last - last_close) / last_close
+            if deviation > risk.max_price_deviation_pct:
+                logger.warning(
+                    "Price sanity check failed — skipping trade",
+                    symbol=signal.symbol,
+                    ticker_price=ticker.last,
+                    last_close=last_close,
+                    deviation_pct=round(deviation * 100, 2),
+                    max_pct=round(risk.max_price_deviation_pct * 100, 2),
+                )
+                return
+
+        portfolio_val = await self._get_portfolio_value()
+        risk_decision = await self._risk_manager.check_signal(
+            signal, portfolio_val, balance, ticker.last,
+        )
+        if not risk_decision.approved:
+            logger.info(
+                "RiskManager rejected signal",
+                symbol=signal.symbol,
+                direction=signal.direction,
+                reason=risk_decision.reason,
+            )
+            return
+
+        base, quote = signal.symbol.split("/")
+        max_order = risk.max_single_order_usdt
+        position_pct = risk.max_position_pct
 
         if signal.direction == "BUY":
             available = balance.get(quote, 0.0)
-            total_portfolio = sum(balance.values())
-            max_for_symbol = total_portfolio * position_pct
-            budget = min(available * position_pct, max_order, max_for_symbol)
+            max_for_symbol = portfolio_val * position_pct
+            budget = min(
+                available * position_pct,
+                max_order,
+                max_for_symbol,
+            )
             if budget < 1.0:
                 logger.warning(
                     "Insufficient budget for BUY",
@@ -436,9 +575,9 @@ class TradingEngine:
                 if existing:
                     total_amount = existing.amount + order.filled_amount
                     avg_price = (
-                        (existing.entry_price * existing.amount + fill_price * order.filled_amount)
-                        / total_amount
-                    )
+                        existing.entry_price * existing.amount
+                        + fill_price * order.filled_amount
+                    ) / total_amount
                     existing.amount = total_amount
                     existing.entry_price = avg_price
                     if fill_price > existing.peak_price:
@@ -450,10 +589,7 @@ class TradingEngine:
                         entry_price=fill_price,
                         peak_price=fill_price,
                     )
-                    pos.set_risk(
-                        self._settings.risk.stop_loss_pct,
-                        self._settings.risk.trailing_stop_pct,
-                    )
+                    pos.set_risk(risk.stop_loss_pct, risk.trailing_stop_pct)
                     self._positions[signal.symbol] = pos
             elif signal.direction == "SELL":
                 self._positions.pop(signal.symbol, None)
@@ -478,8 +614,7 @@ class TradingEngine:
                 direction=signal.direction,
             )
 
-    async def _snapshot_portfolio(self) -> None:
-        """Save a portfolio balance snapshot to the database."""
+    async def _get_portfolio_value(self) -> float:
         try:
             balance = await self._exchange.get_balance()
             total = 0.0
@@ -489,11 +624,20 @@ class TradingEngine:
                 else:
                     try:
                         ticker = await self._exchange.get_ticker(
-                            f"{currency}/USDT"
+                            f"{currency}/USDT",
                         )
                         total += amount * ticker.last
                     except ExchangeError:
                         pass
+            return total
+        except ExchangeError:
+            return 0.0
+
+    async def _snapshot_portfolio(self) -> None:
+        """Save a portfolio balance snapshot to the database."""
+        try:
+            balance = await self._exchange.get_balance()
+            total = await self._get_portfolio_value()
             await self._db.save_portfolio_snapshot(total, balance)
         except ExchangeError:
             logger.exception("Failed to snapshot portfolio")

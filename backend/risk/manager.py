@@ -133,6 +133,36 @@ class RiskManager:
         loss = self._daily_start_value - current_value
         return max(0.0, loss / self._daily_start_value)
 
+    def check_portfolio_health(
+        self, portfolio_value: float,
+    ) -> RiskDecision:
+        """Check drawdown and daily loss limits without a specific signal."""
+        self._maybe_reset_daily(portfolio_value)
+
+        if self._initial_portfolio_value:
+            drawdown = self._calculate_drawdown(portfolio_value)
+            if drawdown >= self._cfg.max_drawdown_pct:
+                return RiskDecision(
+                    approved=False,
+                    reason=(
+                        f"Max drawdown {drawdown:.1%} exceeds"
+                        f" limit {self._cfg.max_drawdown_pct:.1%}"
+                    ),
+                )
+
+        if self._daily_start_value:
+            daily_loss = self._calculate_daily_loss(portfolio_value)
+            if daily_loss >= self._cfg.daily_loss_limit_pct:
+                return RiskDecision(
+                    approved=False,
+                    reason=(
+                        f"Daily loss {daily_loss:.1%} exceeds"
+                        f" limit {self._cfg.daily_loss_limit_pct:.1%}"
+                    ),
+                )
+
+        return RiskDecision(approved=True, reason="Portfolio health OK")
+
     def _maybe_reset_daily(self, current_value: float) -> None:
         """Reset daily tracking at the start of a new UTC day."""
         now = datetime.now(UTC)

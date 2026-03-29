@@ -73,6 +73,11 @@ class RiskConfig:
     max_drawdown_pct: float = 0.15
     daily_loss_limit_pct: float = 0.05
     max_single_order_usdt: float = 1000.0
+    min_confidence: float = 0.4
+    max_concurrent_positions: int = 3
+    max_data_age_seconds: int = 3600
+    max_price_deviation_pct: float = 0.05
+    circuit_breaker_threshold: int = 5
 
 
 @dataclass(frozen=True)

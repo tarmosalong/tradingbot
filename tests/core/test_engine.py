@@ -45,6 +45,20 @@ async def db(tmp_path):
     await database.close()
 
 
+def _recent_ohlcv(periods: int = 20) -> pd.DataFrame:
+    """OHLCV DataFrame with timestamps ending near 'now' so stale-data guard passes."""
+    end = pd.Timestamp.now(tz="UTC")
+    start = end - pd.Timedelta(hours=periods - 1)
+    return pd.DataFrame({
+        "timestamp": pd.date_range(start, periods=periods, freq="h"),
+        "open": [65000.0] * periods,
+        "high": [65200.0] * periods,
+        "low": [64800.0] * periods,
+        "close": [65100.0] * periods,
+        "volume": [100.0] * periods,
+    })
+
+
 @pytest.fixture
 def mock_exchange():
     exchange = AsyncMock()
@@ -54,16 +68,7 @@ def mock_exchange():
     exchange.get_ticker.return_value = Ticker(
         symbol="BTC/USDT", bid=65000.0, ask=65010.0, last=65005.0,
     )
-    exchange.get_ohlcv.return_value = pd.DataFrame(
-        {
-            "timestamp": pd.date_range("2026-01-01", periods=20, freq="h"),
-            "open": [65000.0] * 20,
-            "high": [65200.0] * 20,
-            "low": [64800.0] * 20,
-            "close": [65100.0] * 20,
-            "volume": [100.0] * 20,
-        }
-    )
+    exchange.get_ohlcv.return_value = _recent_ohlcv()
     exchange.create_order.return_value = Order(
         id="o-1",
         symbol="BTC/USDT",
@@ -637,3 +642,207 @@ class TestPositionExitMonitoring:
         await engine._tick()
 
         mock_exchange.create_order.assert_not_called()
+
+
+def _guard_settings(base_settings, **risk_overrides):
+    """Build Settings with custom RiskConfig fields for guard tests."""
+    risk_kwargs = {
+        "max_position_pct": 0.10,
+        "stop_loss_pct": 0.03,
+        "trailing_stop_pct": 0.02,
+        "max_drawdown_pct": 0.15,
+        "daily_loss_limit_pct": 0.05,
+        "max_single_order_usdt": 1000.0,
+        "min_confidence": 0.4,
+        "max_concurrent_positions": 3,
+        "max_data_age_seconds": 3600,
+        "max_price_deviation_pct": 0.05,
+        "circuit_breaker_threshold": 5,
+    }
+    risk_kwargs.update(risk_overrides)
+    return Settings(
+        trading=TradingConfig(
+            mode="paper",
+            pairs=["BTC/USDT"],
+            timeframe="1h",
+            poll_interval_seconds=1,
+        ),
+        paper_trading=base_settings.paper_trading,
+        exchange=base_settings.exchange,
+        strategies=base_settings.strategies,
+        ai=base_settings.ai,
+        risk=RiskConfig(**risk_kwargs),
+    )
+
+
+class TestTradingGuards:
+    """Regression tests for the 6 new engine guards."""
+
+    @pytest.fixture
+    def base_settings(self):
+        return load_settings()
+
+    async def test_risk_manager_rejects_on_drawdown(
+        self, base_settings, mock_exchange, db,
+    ):
+        """When portfolio drops past max_drawdown_pct, no orders are placed."""
+        s = _guard_settings(base_settings, max_drawdown_pct=0.10)
+        engine = TradingEngine(
+            settings=s,
+            exchange=mock_exchange,
+            database=db,
+            strategies=[_buy_strategy()],
+        )
+
+        engine._risk_manager.set_initial_portfolio_value(10_000.0)
+
+        mock_exchange.get_balance.return_value = {"USDT": 8500.0}
+
+        await engine._tick()
+
+        mock_exchange.create_order.assert_not_called()
+
+    async def test_low_confidence_skipped(
+        self, base_settings, mock_exchange, db,
+    ):
+        """Signals below min_confidence threshold are not executed."""
+        s = _guard_settings(base_settings, min_confidence=0.5)
+
+        low_conf = AsyncMock()
+        low_conf.name = "low_conf"
+        low_conf.analyze.return_value = Signal(
+            symbol="BTC/USDT",
+            direction="BUY",
+            confidence=0.3,
+            strategy_name="low_conf",
+            reason="Weak buy",
+        )
+
+        engine = TradingEngine(
+            settings=s,
+            exchange=mock_exchange,
+            database=db,
+            strategies=[low_conf],
+        )
+
+        await engine._tick()
+
+        mock_exchange.create_order.assert_not_called()
+
+    async def test_stale_data_skipped(
+        self, base_settings, mock_exchange, db,
+    ):
+        """OHLCV data older than max_data_age_seconds causes the symbol to be skipped."""
+        s = _guard_settings(base_settings, max_data_age_seconds=600)
+
+        mock_exchange.get_ohlcv.return_value = pd.DataFrame({
+            "timestamp": pd.date_range(
+                "2020-01-01", periods=20, freq="h",
+            ),
+            "open": [65000.0] * 20,
+            "high": [65200.0] * 20,
+            "low": [64800.0] * 20,
+            "close": [65100.0] * 20,
+            "volume": [100.0] * 20,
+        })
+
+        engine = TradingEngine(
+            settings=s,
+            exchange=mock_exchange,
+            database=db,
+            strategies=[_buy_strategy()],
+        )
+
+        await engine._tick()
+
+        mock_exchange.create_order.assert_not_called()
+
+    async def test_max_concurrent_positions(
+        self, base_settings, mock_exchange, db,
+    ):
+        """When max_concurrent_positions is reached, new BUYs are blocked."""
+        s = _guard_settings(
+            base_settings,
+            max_concurrent_positions=2,
+        )
+        engine = TradingEngine(
+            settings=s,
+            exchange=mock_exchange,
+            database=db,
+            strategies=[_buy_strategy()],
+        )
+
+        for sym in ["ETH/USDT", "SOL/USDT"]:
+            pos = OpenPosition(
+                symbol=sym, amount=1.0,
+                entry_price=100.0, peak_price=100.0,
+            )
+            pos.set_risk(0.03, 0.02)
+            engine._positions[sym] = pos
+
+        await engine._tick()
+
+        mock_exchange.create_order.assert_not_called()
+
+    async def test_price_sanity_rejects_wild_price(
+        self, base_settings, mock_exchange, db,
+    ):
+        """If ticker deviates >max_price_deviation_pct from last close, trade is rejected."""
+        s = _guard_settings(base_settings, max_price_deviation_pct=0.05)
+
+        ohlcv = _recent_ohlcv()
+        ohlcv["close"] = 65000.0
+        mock_exchange.get_ohlcv.return_value = ohlcv
+
+        mock_exchange.get_ticker.return_value = Ticker(
+            symbol="BTC/USDT",
+            bid=72000.0,
+            ask=72010.0,
+            last=72000.0,
+        )
+
+        engine = TradingEngine(
+            settings=s,
+            exchange=mock_exchange,
+            database=db,
+            strategies=[_buy_strategy()],
+        )
+
+        await engine._tick()
+
+        mock_exchange.create_order.assert_not_called()
+
+    async def test_circuit_breaker_pauses(
+        self, base_settings, mock_exchange, db, monkeypatch,
+    ):
+        """After N consecutive errors, the engine pauses for 5 minutes."""
+        s = _guard_settings(base_settings, circuit_breaker_threshold=3)
+        engine = TradingEngine(
+            settings=s,
+            exchange=mock_exchange,
+            database=db,
+            strategies=[_buy_strategy()],
+        )
+
+        sleep_calls: list[float] = []
+        original_sleep = asyncio.sleep
+
+        async def mock_sleep(secs, **kwargs):
+            sleep_calls.append(secs)
+            if secs >= 300:
+                engine._running = False
+            else:
+                await original_sleep(0)
+
+        monkeypatch.setattr(asyncio, "sleep", mock_sleep)
+
+        async def exploding_tick():
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(engine, "_tick", exploding_tick)
+
+        engine._running = True
+        engine._risk_manager.set_initial_portfolio_value(10_000.0)
+        await engine.start()
+
+        assert any(s >= 300 for s in sleep_calls)

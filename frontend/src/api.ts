@@ -46,6 +46,11 @@ export interface BotConfig {
     max_drawdown_pct: number;
     daily_loss_limit_pct: number;
     max_single_order_usdt: number;
+    min_confidence: number;
+    max_concurrent_positions: number;
+    max_data_age_seconds: number;
+    max_price_deviation_pct: number;
+    circuit_breaker_threshold: number;
   };
   strategy_params?: {
     rsi: { period: number; oversold: number; overbought: number };
@@ -139,6 +144,11 @@ export interface RiskParams {
   max_drawdown_pct?: number;
   daily_loss_limit_pct?: number;
   max_single_order_usdt?: number;
+  min_confidence?: number;
+  max_concurrent_positions?: number;
+  max_data_age_seconds?: number;
+  max_price_deviation_pct?: number;
+  circuit_breaker_threshold?: number;
 }
 
 export interface PaperBotSettingsBody {

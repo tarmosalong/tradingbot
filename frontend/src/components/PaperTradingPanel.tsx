@@ -46,6 +46,11 @@ interface ParamProfile {
     maxDrawdown: number;
     dailyLoss: number;
     maxOrder: number;
+    minConfidence: number;
+    maxConcurrent: number;
+    maxDataAge: number;
+    maxPriceDeviation: number;
+    circuitBreaker: number;
   };
 }
 
@@ -57,7 +62,7 @@ const PROFILES: Record<string, ParamProfile> = {
     rsi: { period: 14, oversold: 25, overbought: 75 },
     macd: { fast: 12, slow: 26, signal: 9 },
     bollinger: { period: 20, std_dev: 2.5 },
-    risk: { maxPos: 5, stopLoss: 5, trailingStop: 3, maxDrawdown: 10, dailyLoss: 3, maxOrder: 500 },
+    risk: { maxPos: 5, stopLoss: 5, trailingStop: 3, maxDrawdown: 10, dailyLoss: 3, maxOrder: 500, minConfidence: 60, maxConcurrent: 2, maxDataAge: 1800, maxPriceDeviation: 3, circuitBreaker: 3 },
   },
   balanced: {
     label: 'Balanced',
@@ -66,7 +71,7 @@ const PROFILES: Record<string, ParamProfile> = {
     rsi: { period: 14, oversold: 30, overbought: 70 },
     macd: { fast: 12, slow: 26, signal: 9 },
     bollinger: { period: 20, std_dev: 2.0 },
-    risk: { maxPos: 10, stopLoss: 3, trailingStop: 2, maxDrawdown: 20, dailyLoss: 5, maxOrder: 1000 },
+    risk: { maxPos: 10, stopLoss: 3, trailingStop: 2, maxDrawdown: 20, dailyLoss: 5, maxOrder: 1000, minConfidence: 40, maxConcurrent: 3, maxDataAge: 3600, maxPriceDeviation: 5, circuitBreaker: 5 },
   },
   aggressive: {
     label: 'Aggressive',
@@ -75,7 +80,7 @@ const PROFILES: Record<string, ParamProfile> = {
     rsi: { period: 10, oversold: 35, overbought: 65 },
     macd: { fast: 8, slow: 21, signal: 5 },
     bollinger: { period: 15, std_dev: 1.5 },
-    risk: { maxPos: 20, stopLoss: 2, trailingStop: 1, maxDrawdown: 30, dailyLoss: 10, maxOrder: 3000 },
+    risk: { maxPos: 20, stopLoss: 2, trailingStop: 1, maxDrawdown: 30, dailyLoss: 10, maxOrder: 3000, minConfidence: 25, maxConcurrent: 5, maxDataAge: 3600, maxPriceDeviation: 8, circuitBreaker: 8 },
   },
   scalper: {
     label: 'Scalper',
@@ -84,7 +89,7 @@ const PROFILES: Record<string, ParamProfile> = {
     rsi: { period: 7, oversold: 35, overbought: 65 },
     macd: { fast: 5, slow: 13, signal: 4 },
     bollinger: { period: 10, std_dev: 1.5 },
-    risk: { maxPos: 15, stopLoss: 1, trailingStop: 1, maxDrawdown: 15, dailyLoss: 5, maxOrder: 2000 },
+    risk: { maxPos: 15, stopLoss: 1, trailingStop: 1, maxDrawdown: 15, dailyLoss: 5, maxOrder: 2000, minConfidence: 20, maxConcurrent: 4, maxDataAge: 600, maxPriceDeviation: 3, circuitBreaker: 5 },
   },
   hodl: {
     label: 'HODL',
@@ -93,7 +98,7 @@ const PROFILES: Record<string, ParamProfile> = {
     rsi: { period: 21, oversold: 20, overbought: 80 },
     macd: { fast: 16, slow: 36, signal: 12 },
     bollinger: { period: 30, std_dev: 2.5 },
-    risk: { maxPos: 10, stopLoss: 8, trailingStop: 5, maxDrawdown: 25, dailyLoss: 8, maxOrder: 2000 },
+    risk: { maxPos: 10, stopLoss: 8, trailingStop: 5, maxDrawdown: 25, dailyLoss: 8, maxOrder: 2000, minConfidence: 50, maxConcurrent: 3, maxDataAge: 7200, maxPriceDeviation: 5, circuitBreaker: 5 },
   },
 };
 
@@ -128,6 +133,11 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
   const [riskMaxDrawdown, setRiskMaxDrawdown] = useState(20);
   const [riskDailyLoss, setRiskDailyLoss] = useState(5);
   const [riskMaxOrder, setRiskMaxOrder] = useState(1000);
+  const [riskMinConfidence, setRiskMinConfidence] = useState(40);
+  const [riskMaxConcurrent, setRiskMaxConcurrent] = useState(3);
+  const [riskMaxDataAge, setRiskMaxDataAge] = useState(3600);
+  const [riskMaxPriceDeviation, setRiskMaxPriceDeviation] = useState(5);
+  const [riskCircuitBreaker, setRiskCircuitBreaker] = useState(5);
 
   const activeProfile = useMemo(() => {
     for (const [id, p] of Object.entries(PROFILES)) {
@@ -145,7 +155,12 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
         riskTrailingStop === p.risk.trailingStop &&
         riskMaxDrawdown === p.risk.maxDrawdown &&
         riskDailyLoss === p.risk.dailyLoss &&
-        riskMaxOrder === p.risk.maxOrder
+        riskMaxOrder === p.risk.maxOrder &&
+        riskMinConfidence === p.risk.minConfidence &&
+        riskMaxConcurrent === p.risk.maxConcurrent &&
+        riskMaxDataAge === p.risk.maxDataAge &&
+        riskMaxPriceDeviation === p.risk.maxPriceDeviation &&
+        riskCircuitBreaker === p.risk.circuitBreaker
       ) {
         return id;
       }
@@ -157,6 +172,8 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
     bollPeriod, bollStdDev,
     riskMaxPos, riskStopLoss, riskTrailingStop,
     riskMaxDrawdown, riskDailyLoss, riskMaxOrder,
+    riskMinConfidence, riskMaxConcurrent, riskMaxDataAge,
+    riskMaxPriceDeviation, riskCircuitBreaker,
   ]);
 
   const [msg, setMsg] = useState<string | null>(null);
@@ -220,6 +237,11 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
     setRiskMaxDrawdown(Math.round(r.max_drawdown_pct * 100));
     setRiskDailyLoss(Math.round(r.daily_loss_limit_pct * 100));
     setRiskMaxOrder(r.max_single_order_usdt);
+    setRiskMinConfidence(Math.round(r.min_confidence * 100));
+    setRiskMaxConcurrent(r.max_concurrent_positions);
+    setRiskMaxDataAge(r.max_data_age_seconds);
+    setRiskMaxPriceDeviation(Math.round(r.max_price_deviation_pct * 100));
+    setRiskCircuitBreaker(r.circuit_breaker_threshold);
   }, [config]);
 
   const state: BotRunnerState | null = status?.state ?? null;
@@ -286,6 +308,11 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
           max_drawdown_pct: riskMaxDrawdown / 100,
           daily_loss_limit_pct: riskDailyLoss / 100,
           max_single_order_usdt: riskMaxOrder,
+          min_confidence: riskMinConfidence / 100,
+          max_concurrent_positions: riskMaxConcurrent,
+          max_data_age_seconds: riskMaxDataAge,
+          max_price_deviation_pct: riskMaxPriceDeviation / 100,
+          circuit_breaker_threshold: riskCircuitBreaker,
         },
       });
       setMsg('Settings saved to config.yaml.');
@@ -314,6 +341,11 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
     setRiskMaxDrawdown(p.risk.maxDrawdown);
     setRiskDailyLoss(p.risk.dailyLoss);
     setRiskMaxOrder(p.risk.maxOrder);
+    setRiskMinConfidence(p.risk.minConfidence);
+    setRiskMaxConcurrent(p.risk.maxConcurrent);
+    setRiskMaxDataAge(p.risk.maxDataAge);
+    setRiskMaxPriceDeviation(p.risk.maxPriceDeviation);
+    setRiskCircuitBreaker(p.risk.circuitBreaker);
   }
 
   function toggleStrategy(key: string) {
@@ -588,6 +620,18 @@ export function PaperTradingPanel({ config, onConfigRefresh }: PaperTradingPanel
                 <ParamSlider label="Max Drawdown %" value={riskMaxDrawdown} onChange={setRiskMaxDrawdown} min={1} max={50} disabled={!editable} tooltip="If total portfolio drops this % from highest point, trading halts. Default: 20%" />
                 <ParamSlider label="Daily Loss Limit %" value={riskDailyLoss} onChange={setRiskDailyLoss} min={1} max={50} disabled={!editable} tooltip="Maximum loss allowed in a single day. Default: 5%" />
                 <ParamSlider label="Max Order (USDT)" value={riskMaxOrder} onChange={setRiskMaxOrder} min={10} max={100000} step={10} disabled={!editable} tooltip="Maximum value (USDT) for a single order. Default: $1,000" />
+              </div>
+            </div>
+
+            {/* Trading Guards */}
+            <div>
+              <h3 className="text-xs font-medium text-[var(--text-primary)] mb-2">Trading Guards</h3>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <ParamSlider label="Min Confidence %" value={riskMinConfidence} onChange={setRiskMinConfidence} min={0} max={100} disabled={!editable} tooltip="Minimum aggregated signal confidence required to execute a trade. Signals below this are ignored. Default: 40%" />
+                <ParamSlider label="Max Positions" value={riskMaxConcurrent} onChange={setRiskMaxConcurrent} min={1} max={20} disabled={!editable} tooltip="Maximum number of different assets the bot can hold simultaneously. Default: 3" />
+                <ParamSlider label="Max Data Age (s)" value={riskMaxDataAge} onChange={setRiskMaxDataAge} min={60} max={86400} step={60} disabled={!editable} tooltip="Maximum age (seconds) of the latest OHLCV candle before it's considered stale. Stale data is skipped. Default: 3600 (1 hour)" />
+                <ParamSlider label="Price Deviation %" value={riskMaxPriceDeviation} onChange={setRiskMaxPriceDeviation} min={1} max={50} disabled={!editable} tooltip="If the current price deviates more than this % from the last candle close, the trade is rejected (possible API glitch). Default: 5%" />
+                <ParamSlider label="Circuit Breaker" value={riskCircuitBreaker} onChange={setRiskCircuitBreaker} min={1} max={50} disabled={!editable} tooltip="Number of consecutive tick errors before the bot pauses for 5 minutes. Default: 5" />
               </div>
             </div>
           </div>

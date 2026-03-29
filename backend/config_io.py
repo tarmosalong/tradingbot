@@ -130,6 +130,11 @@ def patch_paper_dashboard_settings(
             "max_drawdown_pct": (0.01, 0.50),
             "daily_loss_limit_pct": (0.01, 0.50),
             "max_single_order_usdt": (10, 100_000),
+            "min_confidence": (0.0, 1.0),
+            "max_concurrent_positions": (1, 20),
+            "max_data_age_seconds": (60, 86_400),
+            "max_price_deviation_pct": (0.01, 0.50),
+            "circuit_breaker_threshold": (1, 50),
         })
 
     write_raw_config(data, path)
