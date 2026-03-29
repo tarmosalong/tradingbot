@@ -1,4 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
+import {
+  AreaChart,
+  Area,
+  BarChart,
+  Bar,
+  Cell,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  ReferenceLine,
+} from 'recharts';
 import { api } from '../api';
 import type { SignalEntry } from '../api';
 
@@ -10,6 +22,7 @@ interface SymbolCycle {
   symbol: string;
   aggregated: SignalEntry;
   strategies: SignalEntry[];
+  history: SignalEntry[];
 }
 
 function groupByCycle(signals: SignalEntry[]): SymbolCycle[] {
@@ -22,14 +35,20 @@ function groupByCycle(signals: SignalEntry[]): SymbolCycle[] {
 
   const result: SymbolCycle[] = [];
   for (const [symbol, entries] of bySymbol) {
-    const agg = entries.find((e) => e.strategy_name === 'aggregator');
-    if (!agg) continue;
+    const aggregators = entries
+      .filter((e) => e.strategy_name === 'aggregator')
+      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+    const latest = aggregators[aggregators.length - 1];
+    if (!latest) continue;
+
     const strategies = entries.filter(
       (e) =>
         e.strategy_name !== 'aggregator' &&
-        Math.abs(new Date(e.timestamp).getTime() - new Date(agg.timestamp).getTime()) < 5000,
+        Math.abs(new Date(e.timestamp).getTime() - new Date(latest.timestamp).getTime()) < 5000,
     );
-    result.push({ symbol, aggregated: agg, strategies });
+
+    result.push({ symbol, aggregated: latest, strategies, history: aggregators });
   }
   return result.sort((a, b) => a.symbol.localeCompare(b.symbol));
 }
@@ -46,9 +65,20 @@ const DIR_BG: Record<string, string> = {
   HOLD: 'bg-[var(--bg-secondary)] text-[var(--text-secondary)]',
 };
 
+const DIR_COLOR: Record<string, string> = {
+  BUY: 'var(--accent-green)',
+  SELL: 'var(--accent-red)',
+  HOLD: 'var(--text-secondary)',
+};
+
 function fmtTime(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function fmtShortTime(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 function ConfidenceBar({ value }: { value: number }) {
@@ -83,6 +113,173 @@ function IndicatorPills({ indicators }: { indicators: Record<string, number> }) 
   );
 }
 
+interface ChartPoint {
+  time: string;
+  confidence: number;
+  direction: string;
+  reason: string;
+}
+
+function ConfidenceTimeline({ history }: { history: SignalEntry[] }) {
+  if (history.length < 2) {
+    return (
+      <p className="text-[11px] text-[var(--text-secondary)] py-2 text-center">
+        Waiting for more cycles to show chart...
+      </p>
+    );
+  }
+
+  const data: ChartPoint[] = history.map((h) => ({
+    time: fmtShortTime(h.timestamp),
+    confidence: h.confidence,
+    direction: h.direction,
+    reason: h.reason,
+  }));
+
+  return (
+    <div>
+      <h3 className="text-[11px] font-medium text-[var(--text-secondary)] uppercase tracking-wide mb-2">
+        Aggregated confidence over time
+      </h3>
+      <ResponsiveContainer width="100%" height={140}>
+        <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
+          <defs>
+            <linearGradient id="confGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="var(--accent-blue)" stopOpacity={0.35} />
+              <stop offset="100%" stopColor="var(--accent-blue)" stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <XAxis
+            dataKey="time"
+            tick={{ fill: 'var(--text-secondary)', fontSize: 10 }}
+            axisLine={false}
+            tickLine={false}
+          />
+          <YAxis
+            domain={[0, 1]}
+            ticks={[0, 0.25, 0.5, 0.75, 1.0]}
+            tick={{ fill: 'var(--text-secondary)', fontSize: 10 }}
+            axisLine={false}
+            tickLine={false}
+            tickFormatter={(v: number) => `${Math.round(v * 100)}%`}
+          />
+          <ReferenceLine y={0.5} stroke="var(--border)" strokeDasharray="4 4" />
+          <Tooltip
+            contentStyle={{
+              backgroundColor: 'var(--bg-secondary)',
+              border: '1px solid var(--border)',
+              borderRadius: 6,
+              color: 'var(--text-primary)',
+              fontSize: 12,
+            }}
+            formatter={(_value: unknown, _name: unknown, props: unknown) => {
+              const p = props as { payload?: ChartPoint };
+              const v = Number(_value) || 0;
+              const dir = p.payload?.direction ?? '';
+              return [`${Math.round(v * 100)}% (${dir})`, 'Confidence'];
+            }}
+            labelFormatter={(label: unknown) => String(label ?? '')}
+          />
+          <Area
+            type="monotone"
+            dataKey="confidence"
+            stroke="var(--accent-blue)"
+            fill="url(#confGrad)"
+            strokeWidth={2}
+            dot={(props: unknown) => {
+              const p = props as { cx?: number; cy?: number; payload?: ChartPoint; index?: number };
+              const cx = p.cx ?? 0;
+              const cy = p.cy ?? 0;
+              const dir = p.payload?.direction ?? 'HOLD';
+              return (
+                <circle
+                  key={p.index ?? 0}
+                  cx={cx}
+                  cy={cy}
+                  r={4}
+                  fill={DIR_COLOR[dir] ?? 'var(--text-secondary)'}
+                  stroke="var(--bg-card)"
+                  strokeWidth={2}
+                />
+              );
+            }}
+            activeDot={{ r: 6, strokeWidth: 2, stroke: 'var(--bg-card)' }}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+      <div className="flex items-center justify-center gap-4 mt-1 text-[10px] text-[var(--text-secondary)]">
+        <span className="flex items-center gap-1">
+          <span className="inline-block w-2 h-2 rounded-full bg-[var(--accent-green)]" /> BUY
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block w-2 h-2 rounded-full bg-[var(--accent-red)]" /> SELL
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--text-secondary)' }} /> HOLD
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function StrategyBarChart({ strategies }: { strategies: SignalEntry[] }) {
+  if (strategies.length === 0) return null;
+
+  const data = strategies.map((s) => ({
+    name: s.strategy_name.toUpperCase(),
+    confidence: s.confidence,
+    direction: s.direction,
+  }));
+
+  return (
+    <div>
+      <h3 className="text-[11px] font-medium text-[var(--text-secondary)] uppercase tracking-wide mb-2">
+        Strategy confidence comparison
+      </h3>
+      <ResponsiveContainer width="100%" height={Math.max(80, strategies.length * 36 + 16)}>
+        <BarChart data={data} layout="vertical" margin={{ top: 0, right: 8, bottom: 0, left: 4 }}>
+          <XAxis
+            type="number"
+            domain={[0, 1]}
+            ticks={[0, 0.25, 0.5, 0.75, 1.0]}
+            tick={{ fill: 'var(--text-secondary)', fontSize: 10 }}
+            axisLine={false}
+            tickLine={false}
+            tickFormatter={(v: number) => `${Math.round(v * 100)}%`}
+          />
+          <YAxis
+            type="category"
+            dataKey="name"
+            tick={{ fill: 'var(--text-secondary)', fontSize: 10 }}
+            axisLine={false}
+            tickLine={false}
+            width={80}
+          />
+          <Tooltip
+            contentStyle={{
+              backgroundColor: 'var(--bg-secondary)',
+              border: '1px solid var(--border)',
+              borderRadius: 6,
+              color: 'var(--text-primary)',
+              fontSize: 12,
+            }}
+            formatter={(_value: unknown, _name: unknown, props: unknown) => {
+              const p = props as { payload?: { direction?: string } };
+              const v = Number(_value) || 0;
+              return [`${Math.round(v * 100)}% (${p.payload?.direction ?? ''})`, 'Confidence'];
+            }}
+          />
+          <Bar dataKey="confidence" radius={[0, 4, 4, 0]} barSize={20}>
+            {data.map((entry, idx) => (
+              <Cell key={idx} fill={DIR_COLOR[entry.direction] ?? 'var(--text-secondary)'} fillOpacity={0.8} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
 export function SignalsPanel({ refreshTrigger }: SignalsPanelProps) {
   const [signals, setSignals] = useState<SignalEntry[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -90,7 +287,7 @@ export function SignalsPanel({ refreshTrigger }: SignalsPanelProps) {
 
   const fetchSignals = useCallback(async () => {
     try {
-      const data = await api.signals(80);
+      const data = await api.signals(200);
       setSignals(data);
     } catch {
       /* non-critical */
@@ -114,7 +311,7 @@ export function SignalsPanel({ refreshTrigger }: SignalsPanelProps) {
   if (loading && cycles.length === 0) {
     return (
       <div className="bg-[var(--bg-card)] rounded-lg p-4 border border-[var(--border)]">
-        <p className="text-sm text-[var(--text-secondary)]">Loading signals…</p>
+        <p className="text-sm text-[var(--text-secondary)]">Loading signals...</p>
       </div>
     );
   }
@@ -148,7 +345,7 @@ export function SignalsPanel({ refreshTrigger }: SignalsPanelProps) {
       </div>
 
       <div className="divide-y divide-[var(--border)]">
-        {cycles.map(({ symbol, aggregated, strategies }) => {
+        {cycles.map(({ symbol, aggregated, strategies, history }) => {
           const open = expanded.has(symbol);
           return (
             <div key={symbol}>
@@ -182,12 +379,17 @@ export function SignalsPanel({ refreshTrigger }: SignalsPanelProps) {
               </button>
 
               {open && (
-                <div className="px-4 pb-3 space-y-2">
-                  {strategies.length === 0 ? (
-                    <p className="text-xs text-[var(--text-secondary)] pl-2">
-                      No per-strategy signals in this cycle.
-                    </p>
-                  ) : (
+                <div className="px-4 pb-4 space-y-4">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div className="rounded-lg border border-[var(--border)] p-3">
+                      <ConfidenceTimeline history={history} />
+                    </div>
+                    <div className="rounded-lg border border-[var(--border)] p-3">
+                      <StrategyBarChart strategies={strategies} />
+                    </div>
+                  </div>
+
+                  {strategies.length > 0 && (
                     <div className="rounded-lg border border-[var(--border)] overflow-hidden">
                       <table className="w-full text-xs">
                         <thead>
