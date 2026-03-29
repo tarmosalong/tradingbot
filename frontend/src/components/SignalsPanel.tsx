@@ -1,16 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  ReferenceLine,
-} from 'recharts';
 import { api } from '../api';
 import type { SignalEntry } from '../api';
 import { MiniPriceChart } from './MiniPriceChart';
+import type { SignalPoint } from './MiniPriceChart';
 
 /* ── Friendly labels ── */
 
@@ -219,10 +211,6 @@ const DIR_BG_SM: Record<string, string> = {
 function fmtTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
-function fmtShortTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
-
 /* ── Small components ── */
 
 function ConfidenceGauge({ value, size = 'md' }: { value: number; size?: 'sm' | 'md' }) {
@@ -267,71 +255,6 @@ function InfoTooltip({ text }: { text: string }) {
 }
 
 /* ── Charts ── */
-
-interface ChartPoint { time: string; confidence: number; direction: string; reason: string }
-
-function ConfidenceTimeline({ history }: { history: SignalEntry[] }) {
-  if (history.length < 2) {
-    return (
-      <div className="flex items-center justify-center h-full text-xs text-[var(--text-secondary)] py-4">
-        Collecting data — chart appears after 2+ analysis cycles
-      </div>
-    );
-  }
-  const data: ChartPoint[] = history.map((h) => ({
-    time: fmtShortTime(h.timestamp),
-    confidence: h.confidence,
-    direction: h.direction,
-    reason: h.reason,
-  }));
-  return (
-    <div>
-      <h3 className="text-[11px] font-medium text-[var(--text-secondary)] mb-2">
-        Signal strength over time
-        <InfoTooltip text="Shows how confident the bot has been over recent analysis cycles. Higher means a stronger trading signal was detected." />
-      </h3>
-      <ResponsiveContainer width="100%" height={130}>
-        <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
-          <defs>
-            <linearGradient id="confGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="var(--accent)" stopOpacity={0.35} />
-              <stop offset="100%" stopColor="var(--accent)" stopOpacity={0} />
-            </linearGradient>
-          </defs>
-          <XAxis dataKey="time" tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} axisLine={false} tickLine={false} />
-          <YAxis domain={[0, 1]} ticks={[0, 0.5, 1.0]} tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(v: number) => `${Math.round(v * 100)}%`} />
-          <ReferenceLine y={0.5} stroke="var(--border)" strokeDasharray="4 4" />
-          <Tooltip
-            contentStyle={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)', fontSize: 12 }}
-            formatter={(_v: unknown, _n: unknown, props: unknown) => {
-              const p = props as { payload?: ChartPoint };
-              const v = Number(_v) || 0;
-              return [`${Math.round(v * 100)}% — ${directionLabel(p.payload?.direction ?? '')}`, 'Strength'];
-            }}
-            labelFormatter={(l: unknown) => String(l ?? '')}
-          />
-          <Area
-            type="monotone" dataKey="confidence" stroke="var(--accent)" fill="url(#confGrad)" strokeWidth={2}
-            dot={(props: unknown) => {
-              const p = props as { cx?: number; cy?: number; payload?: ChartPoint; index?: number };
-              return (
-                <circle key={p.index ?? 0} cx={p.cx ?? 0} cy={p.cy ?? 0} r={4}
-                  fill={DIR_COLOR[p.payload?.direction ?? 'HOLD'] ?? 'var(--text-secondary)'}
-                  stroke="var(--bg-card)" strokeWidth={2} />
-              );
-            }}
-            activeDot={{ r: 6, strokeWidth: 2, stroke: 'var(--bg-card)' }}
-          />
-        </AreaChart>
-      </ResponsiveContainer>
-      <div className="flex items-center justify-center gap-5 mt-1 text-[10px] text-[var(--text-secondary)]">
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[var(--accent-green)] inline-block" /> Bullish</span>
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[var(--accent-red)] inline-block" /> Bearish</span>
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: 'var(--text-secondary)' }} /> Neutral</span>
-      </div>
-    </div>
-  );
-}
 
 function verdictText(dir: string, confidence: number): string {
   if (dir === 'HOLD' || confidence < 0.05) return 'No signal detected';
@@ -567,20 +490,20 @@ export function SignalsPanel({ refreshTrigger }: SignalsPanelProps) {
                     </p>
                   </div>
 
-                  {/* Price chart — same time window as signal history */}
+                  {/* Price chart with signal overlay */}
                   <MiniPriceChart
                     symbol={symbol}
                     sinceTimestamp={history.length > 0 ? history[0].timestamp : undefined}
+                    signalHistory={history.map((h): SignalPoint => ({
+                      timestamp: h.timestamp,
+                      confidence: h.confidence,
+                      direction: h.direction,
+                    }))}
                   />
 
-                  {/* Strategy charts */}
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                    <div className="rounded-lg border border-[var(--border)] p-3 bg-[var(--bg-primary)]/30">
-                      <ConfidenceTimeline history={history} />
-                    </div>
-                    <div className="rounded-lg border border-[var(--border)] p-3 bg-[var(--bg-primary)]/30">
-                      <StrategyVerdicts strategies={strategies} />
-                    </div>
+                  {/* Strategy details */}
+                  <div className="rounded-lg border border-[var(--border)] p-3 bg-[var(--bg-primary)]/30">
+                    <StrategyVerdicts strategies={strategies} />
                   </div>
 
                   {/* Strategy cards */}

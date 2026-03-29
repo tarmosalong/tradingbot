@@ -1,19 +1,34 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import {
   createChart,
+  createSeriesMarkers,
   ColorType,
   CrosshairMode,
   CandlestickSeries,
   HistogramSeries,
+  LineSeries,
 } from 'lightweight-charts';
-import type { IChartApi, CandlestickData, HistogramData, Time } from 'lightweight-charts';
+import type {
+  IChartApi,
+  CandlestickData,
+  HistogramData,
+  LineData,
+  Time,
+  SeriesMarker,
+} from 'lightweight-charts';
 import { api } from '../api';
 import type { OhlcvCandle } from '../api';
 
+export interface SignalPoint {
+  timestamp: string;
+  confidence: number;
+  direction: string;
+}
+
 interface MiniPriceChartProps {
   symbol: string;
-  /** Earliest signal timestamp (ISO) — chart will cover the same window */
   sinceTimestamp?: string;
+  signalHistory?: SignalPoint[];
 }
 
 function pickTimeframeAndLimit(sinceTs?: string): { tf: string; limit: number; label: string } {
@@ -38,7 +53,7 @@ const COLORS = {
   volumeDown: 'rgba(239, 68, 68, 0.12)',
 };
 
-export function MiniPriceChart({ symbol, sinceTimestamp }: MiniPriceChartProps) {
+export function MiniPriceChart({ symbol, sinceTimestamp, signalHistory }: MiniPriceChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const [candles, setCandles] = useState<OhlcvCandle[]>([]);
@@ -128,6 +143,44 @@ export function MiniPriceChart({ symbol, sinceTimestamp }: MiniPriceChartProps) 
     }));
     volumeSeries.setData(volumeData);
 
+    if (signalHistory && signalHistory.length > 0) {
+      const signalSeries = chart.addSeries(LineSeries, {
+        color: 'rgba(160, 160, 160, 0.6)',
+        lineWidth: 2,
+        lineStyle: 0,
+        priceScaleId: 'signal',
+        lastValueVisible: false,
+        priceLineVisible: false,
+        crosshairMarkerVisible: true,
+        crosshairMarkerRadius: 4,
+      });
+      chart.priceScale('signal').applyOptions({
+        scaleMargins: { top: 0.05, bottom: 0.2 },
+        visible: false,
+      });
+
+      const signalData: LineData<Time>[] = signalHistory.map((s) => ({
+        time: Math.floor(new Date(s.timestamp).getTime() / 1000) as Time,
+        value: s.confidence * 100,
+      }));
+      signalSeries.setData(signalData);
+
+      const markers: SeriesMarker<Time>[] = signalHistory
+        .filter((s) => s.direction !== 'HOLD' && s.confidence >= 0.5)
+        .map((s) => ({
+          time: Math.floor(new Date(s.timestamp).getTime() / 1000) as Time,
+          position: s.direction === 'BUY' ? ('belowBar' as const) : ('aboveBar' as const),
+          color: s.direction === 'BUY' ? '#22c55e' : '#ef4444',
+          shape: s.direction === 'BUY' ? ('arrowUp' as const) : ('arrowDown' as const),
+          text: s.direction === 'BUY' ? 'BUY' : 'SELL',
+        }))
+        .sort((a, b) => (a.time as number) - (b.time as number));
+
+      if (markers.length > 0) {
+        createSeriesMarkers(candleSeries, markers);
+      }
+    }
+
     chart.timeScale().fitContent();
 
     const ro = new ResizeObserver(() => {
@@ -140,7 +193,7 @@ export function MiniPriceChart({ symbol, sinceTimestamp }: MiniPriceChartProps) 
       chart.remove();
       chartRef.current = null;
     };
-  }, [candles]);
+  }, [candles, signalHistory]);
 
   const lastCandle = candles.length > 0 ? candles[candles.length - 1] : null;
   const prevCandle = candles.length > 1 ? candles[candles.length - 2] : null;
@@ -167,13 +220,29 @@ export function MiniPriceChart({ symbol, sinceTimestamp }: MiniPriceChartProps) 
   return (
     <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-primary)]/30 overflow-hidden">
       <div className="flex items-center justify-between px-3 pt-2.5 pb-1">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           <span className="text-[11px] font-medium text-[var(--text-secondary)]">
-            Price chart
+            Price + signals
           </span>
           <span className="text-[10px] text-[var(--text-secondary)] px-1.5 py-0.5 rounded bg-[var(--bg-secondary)]">
             {label}
           </span>
+          {signalHistory && signalHistory.length > 0 && (
+            <div className="flex items-center gap-3 text-[10px] text-[var(--text-secondary)]">
+              <span className="flex items-center gap-1">
+                <span className="w-3 h-0.5 bg-[#a0a0a0] inline-block rounded opacity-60" />
+                Signal strength
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-0 h-0 border-l-[3px] border-r-[3px] border-b-[5px] border-l-transparent border-r-transparent border-b-[#22c55e] inline-block" />
+                Buy
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-0 h-0 border-l-[3px] border-r-[3px] border-t-[5px] border-l-transparent border-r-transparent border-t-[#ef4444] inline-block" />
+                Sell
+              </span>
+            </div>
+          )}
         </div>
         {lastCandle && (
           <div className="flex items-center gap-2">
