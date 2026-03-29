@@ -88,6 +88,16 @@ async def get_portfolio(limit: int = 100):
     return history
 
 
+@router.get("/signals")
+async def get_signals(
+    symbol: str | None = None,
+    strategy: str | None = None,
+    limit: int = 50,
+):
+    db = get_database()
+    return await db.get_signals(symbol=symbol, strategy=strategy, limit=limit)
+
+
 class RSIParams(BaseModel):
     period: int = 14
     oversold: int = 30

@@ -93,6 +93,8 @@ class TradingEngine:
             if not signals:
                 continue
 
+            await self._persist_signals(signals)
+
             combined = self._aggregate_signals(signals)
             logger.info(
                 "Aggregated signal",
@@ -101,6 +103,9 @@ class TradingEngine:
                 confidence=combined.confidence,
                 reason=combined.reason,
             )
+
+            await self._persist_signals([combined])
+            await self._broadcast_signal(combined)
 
             if combined.direction == "HOLD":
                 continue
@@ -187,6 +192,30 @@ class TradingEngine:
             strategy_name="aggregator",
             reason=" | ".join(reasons),
         )
+
+    async def _persist_signals(self, signals: list[Signal]) -> None:
+        for sig in signals:
+            try:
+                await self._db.insert_signal(sig)
+            except Exception:
+                logger.debug("Failed to persist signal", strategy=sig.strategy_name)
+
+    async def _broadcast_signal(self, signal: Signal) -> None:
+        try:
+            from backend.api.websocket import manager
+
+            await manager.broadcast({
+                "type": "signal",
+                "symbol": signal.symbol,
+                "direction": signal.direction,
+                "confidence": signal.confidence,
+                "strategy_name": signal.strategy_name,
+                "reason": signal.reason,
+                "indicators": signal.indicators,
+                "timestamp": signal.timestamp.isoformat(),
+            })
+        except Exception:
+            logger.debug("Signal broadcast failed")
 
     async def _execute_signal(self, signal: Signal) -> None:
         """Execute a trading signal via the exchange."""

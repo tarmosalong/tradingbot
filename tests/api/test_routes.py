@@ -9,7 +9,7 @@ from httpx import ASGITransport, AsyncClient
 import backend.api.deps as deps_module
 from backend.api.app import create_app
 from backend.database import Database
-from backend.models import Order, OrderSide, OrderStatus, OrderType, Trade
+from backend.models import Order, OrderSide, OrderStatus, OrderType, Signal, Trade
 
 
 @pytest.fixture
@@ -146,3 +146,39 @@ class TestPortfolioEndpoint:
         data = response.json()
         assert len(data) == 1
         assert data[0]["total_value_usdt"] == 10000.0
+
+
+class TestSignalsEndpoint:
+    async def test_get_signals_empty(self, client):
+        response = await client.get("/api/signals")
+        assert response.status_code == 200
+        assert response.json() == []
+
+    async def test_get_signals_returns_data(self, client, db):
+        await db.insert_signal(Signal(
+            symbol="BTC/USDT",
+            direction="BUY",
+            confidence=0.8,
+            strategy_name="rsi",
+            reason="Oversold",
+            indicators={"rsi": 25.0},
+        ))
+        response = await client.get("/api/signals")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 1
+        assert data[0]["direction"] == "BUY"
+        assert data[0]["strategy_name"] == "rsi"
+        assert data[0]["indicators"]["rsi"] == 25.0
+
+    async def test_get_signals_filter_symbol(self, client, db):
+        for sym in ("BTC/USDT", "ETH/USDT"):
+            await db.insert_signal(Signal(
+                symbol=sym, direction="HOLD", confidence=0.0,
+                strategy_name="aggregator", reason="test",
+            ))
+        response = await client.get("/api/signals?symbol=ETH/USDT")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 1
+        assert data[0]["symbol"] == "ETH/USDT"

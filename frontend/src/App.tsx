@@ -8,6 +8,7 @@ import { PortfolioChart } from './components/PortfolioChart';
 import { TradesTable } from './components/TradesTable';
 import { ConfigPanel } from './components/ConfigPanel';
 import { PaperTradingPanel } from './components/PaperTradingPanel';
+import { SignalsPanel } from './components/SignalsPanel';
 import { BacktestPanel } from './components/BacktestPanel';
 
 type Tab = 'dashboard' | 'backtest';
@@ -50,6 +51,8 @@ function App() {
     }
   }, [lastMessage, fetchData]);
 
+  const signalTrigger = lastMessage?.type === 'signal' ? lastMessage : null;
+
   return (
     <div className="min-h-screen flex flex-col">
       <Header mode={config?.mode ?? '...'} connected={connected} />
@@ -76,6 +79,7 @@ function App() {
             {config?.mode === 'paper' && (
               <PaperTradingPanel config={config} onConfigRefresh={fetchData} />
             )}
+            <SignalsPanel refreshTrigger={signalTrigger} />
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="lg:col-span-2">
                 <PortfolioChart data={portfolio} />

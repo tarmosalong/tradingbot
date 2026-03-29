@@ -312,3 +312,39 @@ class TestTradingEngine:
         history = await db.get_portfolio_history()
         assert len(history) == 1
         assert history[0]["total_value_usdt"] == 10000.0
+
+    async def test_tick_persists_signals(
+        self, settings, mock_exchange, db,
+    ):
+        engine = TradingEngine(
+            settings=settings,
+            exchange=mock_exchange,
+            database=db,
+            strategies=[_buy_strategy(), _hold_strategy()],
+        )
+
+        await engine._tick()
+
+        signals = await db.get_signals(limit=10)
+        names = [s["strategy_name"] for s in signals]
+        assert "aggregator" in names
+        assert "test_buy" in names
+        assert "test_hold" in names
+
+    async def test_tick_hold_still_persists_signals(
+        self, settings, mock_exchange, db,
+    ):
+        engine = TradingEngine(
+            settings=settings,
+            exchange=mock_exchange,
+            database=db,
+            strategies=[_hold_strategy()],
+        )
+
+        await engine._tick()
+
+        signals = await db.get_signals(limit=10)
+        assert len(signals) >= 2
+        agg = [s for s in signals if s["strategy_name"] == "aggregator"]
+        assert len(agg) == 1
+        assert agg[0]["direction"] == "HOLD"

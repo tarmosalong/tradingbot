@@ -90,6 +90,17 @@ async function fetchJsonRequest<T>(path: string, init: RequestInit): Promise<T> 
   return text ? (JSON.parse(text) as T) : ({} as T);
 }
 
+export interface SignalEntry {
+  id: number;
+  symbol: string;
+  direction: 'BUY' | 'SELL' | 'HOLD';
+  confidence: number;
+  strategy_name: string;
+  reason: string;
+  indicators: Record<string, number>;
+  timestamp: string;
+}
+
 export type BotRunnerState = 'stopped' | 'starting' | 'running' | 'stopping';
 
 export interface BotStatus {
@@ -116,6 +127,7 @@ export const api = {
     fetchJson<Order[]>(`/orders${symbol ? `?symbol=${symbol}` : ''}`),
   portfolio: (limit = 100) =>
     fetchJson<PortfolioSnapshot[]>(`/portfolio?limit=${limit}`),
+  signals: (limit = 50) => fetchJson<SignalEntry[]>(`/signals?limit=${limit}`),
   botStatus: () => fetchJson<BotStatus>('/bot/status'),
   botStart: () =>
     fetchJsonRequest<{ ok: boolean } & BotStatus>('/bot/start', { method: 'POST' }),

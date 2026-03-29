@@ -119,3 +119,66 @@ class TestDatabase:
         assert len(history) == 1
         assert history[0]["total_value_usdt"] == 10500.0
         assert history[0]["balances"]["BTC"] == 0.023
+
+
+class TestSignalLog:
+    async def test_insert_and_get_signal(self, db: Database):
+        signal = Signal(
+            symbol="BTC/USDT",
+            direction="BUY",
+            confidence=0.75,
+            strategy_name="rsi",
+            reason="Oversold bounce",
+            indicators={"rsi": 28.5},
+        )
+        await db.insert_signal(signal)
+
+        rows = await db.get_signals()
+        assert len(rows) == 1
+        assert rows[0]["symbol"] == "BTC/USDT"
+        assert rows[0]["direction"] == "BUY"
+        assert rows[0]["confidence"] == 0.75
+        assert rows[0]["strategy_name"] == "rsi"
+        assert rows[0]["indicators"]["rsi"] == 28.5
+
+    async def test_get_signals_filter_by_symbol(self, db: Database):
+        for sym in ("BTC/USDT", "ETH/USDT"):
+            await db.insert_signal(Signal(
+                symbol=sym, direction="HOLD", confidence=0.0,
+                strategy_name="rsi", reason="neutral",
+            ))
+
+        btc = await db.get_signals(symbol="BTC/USDT")
+        assert len(btc) == 1
+        assert btc[0]["symbol"] == "BTC/USDT"
+
+    async def test_get_signals_filter_by_strategy(self, db: Database):
+        for name in ("rsi", "macd", "aggregator"):
+            await db.insert_signal(Signal(
+                symbol="BTC/USDT", direction="HOLD", confidence=0.0,
+                strategy_name=name, reason="test",
+            ))
+
+        agg = await db.get_signals(strategy="aggregator")
+        assert len(agg) == 1
+        assert agg[0]["strategy_name"] == "aggregator"
+
+    async def test_get_signals_respects_limit(self, db: Database):
+        for i in range(10):
+            await db.insert_signal(Signal(
+                symbol="BTC/USDT", direction="HOLD", confidence=0.0,
+                strategy_name="rsi", reason=f"signal {i}",
+            ))
+
+        rows = await db.get_signals(limit=3)
+        assert len(rows) == 3
+
+    async def test_insert_signal_without_indicators(self, db: Database):
+        await db.insert_signal(Signal(
+            symbol="ETH/USDT", direction="SELL", confidence=0.6,
+            strategy_name="macd", reason="Bearish cross",
+        ))
+
+        rows = await db.get_signals()
+        assert len(rows) == 1
+        assert rows[0]["indicators"] == {}

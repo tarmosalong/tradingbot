@@ -6,7 +6,7 @@ from pathlib import Path
 
 import aiosqlite
 
-from backend.models import Order, OrderSide, OrderStatus, OrderType, Trade
+from backend.models import Order, OrderSide, OrderStatus, OrderType, Signal, Trade
 
 _DB_PATH = Path(__file__).resolve().parent.parent / "tradingbot.db"
 
@@ -43,6 +43,19 @@ CREATE TABLE IF NOT EXISTS portfolio_snapshots (
     balances_json TEXT NOT NULL,
     timestamp TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS signal_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    confidence REAL NOT NULL,
+    strategy_name TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    indicators_json TEXT,
+    timestamp TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_signal_log_ts ON signal_log(timestamp DESC);
 """
 
 
@@ -181,6 +194,64 @@ class Database:
             {
                 "total_value_usdt": row["total_value_usdt"],
                 "balances": json.loads(row["balances_json"]),
+                "timestamp": row["timestamp"],
+            }
+            for row in rows
+        ]
+
+    async def insert_signal(self, signal: Signal) -> None:
+        conn = self._ensure_connected()
+        indicators_json = json.dumps(signal.indicators) if signal.indicators else None
+        await conn.execute(
+            "INSERT INTO signal_log"
+            " (symbol, direction, confidence, strategy_name, reason,"
+            "  indicators_json, timestamp)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                signal.symbol,
+                signal.direction,
+                signal.confidence,
+                signal.strategy_name,
+                signal.reason,
+                indicators_json,
+                signal.timestamp.isoformat(),
+            ),
+        )
+        await conn.commit()
+
+    async def get_signals(
+        self,
+        symbol: str | None = None,
+        strategy: str | None = None,
+        limit: int = 50,
+    ) -> list[dict]:
+        conn = self._ensure_connected()
+        clauses: list[str] = []
+        params: list[object] = []
+        if symbol:
+            clauses.append("symbol = ?")
+            params.append(symbol)
+        if strategy:
+            clauses.append("strategy_name = ?")
+            params.append(strategy)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        params.append(limit)
+        cursor = await conn.execute(
+            f"SELECT * FROM signal_log{where} ORDER BY timestamp DESC LIMIT ?",
+            params,
+        )
+        rows = await cursor.fetchall()
+        return [
+            {
+                "id": row["id"],
+                "symbol": row["symbol"],
+                "direction": row["direction"],
+                "confidence": row["confidence"],
+                "strategy_name": row["strategy_name"],
+                "reason": row["reason"],
+                "indicators": json.loads(row["indicators_json"])
+                if row["indicators_json"]
+                else {},
                 "timestamp": row["timestamp"],
             }
             for row in rows

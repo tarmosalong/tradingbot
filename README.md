@@ -773,6 +773,7 @@ All REST endpoints are prefixed with `/api`.
 | `GET` | `/api/trades` | `?symbol=&limit=50` | List of trades |
 | `GET` | `/api/orders` | `?symbol=` | Open orders |
 | `GET` | `/api/portfolio` | `?limit=100` | Portfolio history |
+| `GET` | `/api/signals` | `?symbol=&strategy=&limit=50` | Signal log: per-strategy + aggregated signals from each engine cycle |
 | `GET` | `/api/bot/status` | — | In-process paper loop: `state`, `mode`, `control_enabled`, `last_error` |
 | `POST` | `/api/bot/start` | — | Starts `TradingEngine` inside the API process (**`trading.mode` must be `paper`**). `403` if `BOT_CONTROL_ENABLED` is false |
 | `POST` | `/api/bot/stop` | — | Stops the in-process loop (may take up to one poll interval) |
@@ -787,7 +788,7 @@ If the dashboard shows **Not Found** for bot actions, the API process is missing
 
 | Path | Description |
 |------|-------------|
-| `/ws` | Live updates (trades, portfolio changes) |
+| `/ws` | Live updates — message types: `pong`, `signal` (per-cycle aggregated signal with `symbol`, `direction`, `confidence`, `reason`, `indicators`, `timestamp`) |
 
 ### POST `/api/backtest` Request
 
@@ -1035,4 +1036,7 @@ ruff check backend/ tests/
 | `tests/notifications/test_telegram.py` | 11 | Telegram API payload, disabled path, session lifecycle |
 | `tests/ai/test_openai_client.py` | 5 | OpenAI JSON parsing, LLMProvider |
 | `tests/ai/test_veto_system.py` | 9 | Quorum, failures, timeouts |
-| `tests/` (all) | **207** | Full suite — `pytest tests/ -v` |
+| `tests/test_database.py` | 11 | Trades, orders, portfolio snapshots, signal log insert/query/filters |
+| `tests/core/test_engine.py` | 11 | Signal aggregation, tick execution, signal persistence |
+| `tests/api/test_routes.py` | 13 | REST endpoints: health, config, trades, orders, portfolio, signals |
+| `tests/` (all) | **229** | Full suite — `pytest tests/ -v` |
